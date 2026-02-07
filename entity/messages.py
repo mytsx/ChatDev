@@ -109,6 +109,14 @@ class MessageBlock:
     attachment: Optional[AttachmentRef] = None
     data: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        # Ensure type is always a MessageBlockType enum, even if a plain string was passed.
+        if isinstance(self.type, str):
+            try:
+                self.type = MessageBlockType(self.type)
+            except ValueError:
+                self.type = MessageBlockType.DATA
+
     def to_dict(self, include_data: bool = True) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "type": self.type.value,
