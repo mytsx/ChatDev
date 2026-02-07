@@ -352,6 +352,22 @@ graph:
       carry_data: true
       keep_message: false
 
+    # Task Planner output → Task Iteration (keep in memory so Developer sees the plan)
+    - from: Task Planner
+      to: Task Iteration
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # Requirements Analyst output → Task Iteration (keep in memory for context)
+    - from: Requirements Analyst
+      to: Task Iteration
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
     # ═══ Phase 03 → Phase 04: Approval routing ═══
     # User approves → proceed to development
     - from: Plan Approval
