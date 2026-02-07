@@ -11,6 +11,7 @@ class WorkflowRequest(BaseModel):
     session_id: Optional[str] = None
     attachments: Optional[List[str]] = None
     log_level: Literal["INFO", "DEBUG"] = "INFO"
+    previous_session_id: Optional[str] = None
 
 
 class WorkflowUploadContentRequest(BaseModel):

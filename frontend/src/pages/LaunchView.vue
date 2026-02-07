@@ -425,6 +425,14 @@
             </button>
 
             <button
+              v-if="status === 'Completed'"
+              class="relaunch-button"
+              @click="relaunchWorkflow"
+            >
+              Relaunch
+            </button>
+
+            <button
               class="cancel-button"
               :disabled="status !== 'Running...'"
               @click="cancelWorkflow"
@@ -664,6 +672,10 @@ const viewMode = ref('chat')
 let ws = null
 let sessionId = null
 
+// Continue mode: track completed session for workspace reuse
+const completedSessionId = ref(null)
+const pendingContinueSessionId = ref(null)
+
 const filteredWorkflowFiles = computed(() => {
   // If the file search box is untouched, return all workflows
   if (!isFileSearchDirty.value) {
@@ -695,7 +707,10 @@ const buttonLabel = computed(() => {
   if (isWorkflowRunning.value) {
     return 'Send'
   }
-  if (status.value === 'Completed' || status.value === 'Cancelled') {
+  if (status.value === 'Completed') {
+    return 'Continue'
+  }
+  if (status.value === 'Cancelled') {
     return 'Relaunch'
   }
   return 'Launch'
@@ -1321,13 +1336,28 @@ const handleButtonClick = () => {
 
     status.value = "Running..."
     shouldGlow.value = false
-  } else if (status.value === 'Completed' || status.value === 'Cancelled') {
-    // If Relaunch, restart the same workflow and re-enter Launch state
+  } else if (status.value === 'Completed') {
+    // Continue: reuse previous workspace and Claude Code sessions
     if (!selectedFile.value) {
       alert('Please choose a workflow file！')
       return
     }
 
+    // Save the completed session ID for workspace reuse
+    pendingContinueSessionId.value = completedSessionId.value
+    resetConnectionState()
+    status.value = 'Connecting...'
+    handleYAMLSelection(selectedFile.value)
+    establishWebSocketConnection()
+  } else if (status.value === 'Cancelled') {
+    // Relaunch: fresh start
+    if (!selectedFile.value) {
+      alert('Please choose a workflow file！')
+      return
+    }
+
+    completedSessionId.value = null
+    pendingContinueSessionId.value = null
     resetConnectionState()
     status.value = 'Connecting...'
     handleYAMLSelection(selectedFile.value)
@@ -1336,6 +1366,20 @@ const handleButtonClick = () => {
     // If Launch, start the workflow
     launchWorkflow()
   }
+}
+
+// Relaunch: fresh start, discard previous session
+const relaunchWorkflow = () => {
+  if (!selectedFile.value) {
+    alert('Please choose a workflow file！')
+    return
+  }
+  completedSessionId.value = null
+  pendingContinueSessionId.value = null
+  resetConnectionState()
+  status.value = 'Connecting...'
+  handleYAMLSelection(selectedFile.value)
+  establishWebSocketConnection()
 }
 
 // Send human input
@@ -1755,7 +1799,8 @@ const launchWorkflow = async () => {
         yaml_file: selectedFile.value,
         task_prompt: trimmedPrompt,
         session_id: sessionId,
-        attachments: attachmentIds
+        attachments: attachmentIds,
+        previous_session_id: pendingContinueSessionId.value || undefined
       })
     })
 
@@ -1782,6 +1827,7 @@ const launchWorkflow = async () => {
       status.value = 'Running...'
       isWorkflowRunning.value = true
       tokenUsage.value = null
+      pendingContinueSessionId.value = null
     } else {
       const error = await response.json().catch(() => ({}))
       console.error('Failed to launch workflow:', error)
@@ -2128,6 +2174,7 @@ const processMessage = async (msg) => {
     status.value = 'Completed'
     isWorkflowRunning.value = false
     sessionIdToDownload = sessionId
+    completedSessionId.value = sessionId
 
     // Capture token usage & cost data
     if (msg.data.token_usage) {
@@ -3216,6 +3263,24 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.relaunch-button {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  background: #3a3a3a;
+  transition: all 0.3s ease;
+}
+
+.relaunch-button:hover {
+  transform: translateY(-2px);
+  background: #4a4a4a;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
 .cancel-button {

@@ -62,6 +62,7 @@ class WorkflowRunService:
         *,
         attachments: Optional[List[str]] = None,
         log_level: Optional[LogLevel] = None,
+        previous_session_id: Optional[str] = None,
     ) -> None:
         normalized_yaml_name = (yaml_file or "").strip()
         try:
@@ -99,6 +100,7 @@ class WorkflowRunService:
                 websocket_manager,
                 attachments,
                 log_level,
+                previous_session_id=previous_session_id,
             )
         except ValidationError as exc:
             self.logger.error(str(exc))
@@ -141,14 +143,24 @@ class WorkflowRunService:
         websocket_manager,
         attachments: List[str],
         log_level: LogLevel,
+        *,
+        previous_session_id: Optional[str] = None,
     ) -> None:
         session = self.session_store.get_session(session_id)
         cancel_event = session.cancel_event if session else None
         try:
             design = load_config(yaml_path)
+
+            # Reuse previous workspace when continuing
+            workspace_name = (
+                f"session_{previous_session_id}"
+                if previous_session_id
+                else f"session_{session_id}"
+            )
+
             graph_config = GraphConfig.from_definition(
                 design.graph,
-                name=f"session_{session_id}",
+                name=workspace_name,
                 output_root=WARE_HOUSE_DIR,
                 source_path=str(yaml_path),
                 vars=design.vars,
@@ -157,6 +169,21 @@ class WorkflowRunService:
                 graph_config.log_level = log_level
                 graph_config.definition.log_level = log_level
             graph_context = GraphContext(config=graph_config)
+
+            # Load persisted Claude Code sessions when continuing
+            if previous_session_id:
+                from runtime.node.agent.providers.claude_code_provider import (
+                    ClaudeCodeProvider,
+                )
+                code_workspace = graph_context.directory / "code_workspace"
+                if code_workspace.exists():
+                    ClaudeCodeProvider.load_sessions_from_workspace(
+                        str(code_workspace),
+                    )
+                    self.logger.info(
+                        "Loaded Claude Code sessions from %s for continuation",
+                        code_workspace,
+                    )
 
             executor = WebSocketGraphExecutor(
                 graph_context,

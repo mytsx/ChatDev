@@ -66,6 +66,26 @@ class ClaudeCodeProvider(ModelProvider):
         with cls._sessions_lock:
             cls._sessions.clear()
 
+    @classmethod
+    def save_sessions_to_workspace(cls, workspace_root: str) -> None:
+        """Persist current sessions to workspace for future continuation."""
+        path = Path(workspace_root) / ".claude_sessions.json"
+        with cls._sessions_lock:
+            if cls._sessions:
+                path.write_text(json.dumps(cls._sessions))
+
+    @classmethod
+    def load_sessions_from_workspace(cls, workspace_root: str) -> None:
+        """Load previously saved sessions from workspace."""
+        path = Path(workspace_root) / ".claude_sessions.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                with cls._sessions_lock:
+                    cls._sessions.update(data)
+            except (json.JSONDecodeError, OSError):
+                pass
+
     def __init__(self, config: AgentConfig):
         super().__init__(config)
         self._claude_binary = self._find_claude_binary()
@@ -251,6 +271,9 @@ class ClaudeCodeProvider(ModelProvider):
             new_session_id = raw_response.get("session_id")
             if new_session_id and node_id:
                 self.set_session(node_id, new_session_id)
+                # Also persist to workspace for cross-session continuation
+                if cwd:
+                    self.save_sessions_to_workspace(cwd)
 
             return self._build_stream_response(raw_response, stderr_text)
         finally:
