@@ -29,6 +29,7 @@ async def execute_workflow(request: WorkflowRequest):
                 attachments=request.attachments,
                 log_level=log_level,
                 previous_session_id=request.previous_session_id,
+                workspace_path=request.workspace_path,
             )
         )
 

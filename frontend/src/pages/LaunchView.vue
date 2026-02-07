@@ -380,6 +380,15 @@
         </Transition>
       </div>
 
+          <label class="section-label">Workspace Path <span class="optional-tag">(optional)</span></label>
+          <input
+            v-model="workspacePath"
+            type="text"
+            class="workspace-path-input"
+            placeholder="/path/to/your/project"
+            :disabled="loading || isWorkflowRunning"
+          />
+
           <label class="section-label">Status</label>
           <div class="status-display" :class="{ 'status-active': status === 'Running...' }">
             {{ status }}
@@ -515,6 +524,9 @@ const route = useRoute()
 
 // Task input state
 const taskPrompt = ref('')
+
+// Workspace path (optional external project directory)
+const workspacePath = ref('')
 
 // File selector state
 const workflowFiles = ref([])
@@ -1800,7 +1812,8 @@ const launchWorkflow = async () => {
         task_prompt: trimmedPrompt,
         session_id: sessionId,
         attachments: attachmentIds,
-        previous_session_id: pendingContinueSessionId.value || undefined
+        previous_session_id: pendingContinueSessionId.value || undefined,
+        workspace_path: workspacePath.value.trim() || undefined
       })
     })
 
@@ -3071,6 +3084,38 @@ watch(
 .file-selector-input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.workspace-path-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+  box-sizing: border-box;
+}
+.workspace-path-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+.workspace-path-input:hover:not(:disabled),
+.workspace-path-input:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+}
+.workspace-path-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.optional-tag {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 400;
 }
 
 .select-arrow {

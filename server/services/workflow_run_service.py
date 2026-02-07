@@ -63,11 +63,21 @@ class WorkflowRunService:
         attachments: Optional[List[str]] = None,
         log_level: Optional[LogLevel] = None,
         previous_session_id: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> None:
         normalized_yaml_name = (yaml_file or "").strip()
         try:
             yaml_path = self._resolve_yaml_path(normalized_yaml_name)
             normalized_yaml_name = yaml_path.name
+
+            # Validate workspace_path if provided
+            if workspace_path:
+                ws = Path(workspace_path)
+                if not ws.is_absolute():
+                    raise ValidationError(
+                        "workspace_path must be an absolute path",
+                        details={"workspace_path": workspace_path},
+                    )
 
             attachments = attachments or []
             if (not task_prompt or not task_prompt.strip()) and not attachments:
@@ -101,6 +111,7 @@ class WorkflowRunService:
                 attachments,
                 log_level,
                 previous_session_id=previous_session_id,
+                workspace_path=workspace_path,
             )
         except ValidationError as exc:
             self.logger.error(str(exc))
@@ -145,6 +156,7 @@ class WorkflowRunService:
         log_level: LogLevel,
         *,
         previous_session_id: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> None:
         session = self.session_store.get_session(session_id)
         cancel_event = session.cancel_event if session else None
@@ -168,6 +180,11 @@ class WorkflowRunService:
             if log_level:
                 graph_config.log_level = log_level
                 graph_config.definition.log_level = log_level
+
+            # Store workspace_path in metadata for RuntimeBuilder
+            if workspace_path:
+                graph_config.metadata["workspace_path"] = workspace_path
+
             graph_context = GraphContext(config=graph_config)
 
             # Load persisted Claude Code sessions when continuing

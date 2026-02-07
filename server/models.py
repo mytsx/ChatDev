@@ -12,6 +12,7 @@ class WorkflowRequest(BaseModel):
     attachments: Optional[List[str]] = None
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     previous_session_id: Optional[str] = None
+    workspace_path: Optional[str] = None
 
 
 class WorkflowUploadContentRequest(BaseModel):
