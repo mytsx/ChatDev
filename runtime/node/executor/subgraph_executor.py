@@ -78,10 +78,15 @@ class SubgraphNodeExecutor(NodeExecutor):
         if parent_workspace and hasattr(subgraph, "config") and hasattr(subgraph.config, "metadata"):
             subgraph.config.metadata.setdefault("workspace_path", str(parent_workspace))
 
-        # Execute the subgraph (requires importing ``GraphExecutor``)
-        from workflow.graph import GraphExecutor
-
-        executor = GraphExecutor.execute_graph(subgraph, task_prompt=task_payload)
+        # Execute the subgraph.  If the parent graph was launched via a
+        # WebSocket-aware executor it will have stored a factory in
+        # global_state so that subgraph events are also broadcast.
+        factory = self.context.global_state.get("_subgraph_executor_factory")
+        if factory:
+            executor = factory(subgraph, task_payload)
+        else:
+            from workflow.graph import GraphExecutor
+            executor = GraphExecutor.execute_graph(subgraph, task_prompt=task_payload)
         result_messages = executor.get_final_output_messages()
         
         final_results = []
