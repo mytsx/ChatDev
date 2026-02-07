@@ -438,16 +438,16 @@ graph:
           case_sensitive: true
       carry_data: true
 
-    # Integration test FAIL → Integration Fix Counter
+    # Integration test FAIL or unknown → Integration Fix Counter (fallback)
     - from: Integration Tester
       to: Integration Fix Counter
       trigger: true
       condition:
         type: keyword
         config:
-          any:
-            - INT_FAIL
-          none: []
+          any: []
+          none:
+            - INT_PASS
           regex: []
           case_sensitive: true
       carry_data: true

@@ -214,16 +214,16 @@ graph:
       carry_data: true
       clear_context: true
 
-    # Code Review FAIL → Review Loop Counter
+    # Code Review FAIL or unknown → Review Loop Counter (fallback)
     - from: Code Reviewer
       to: Review Loop Counter
       trigger: true
       condition:
         type: keyword
         config:
-          any:
-            - CODE_FAIL
-          none: []
+          any: []
+          none:
+            - CODE_PASS
           regex: []
           case_sensitive: true
       carry_data: true
@@ -257,16 +257,16 @@ graph:
           case_sensitive: true
       carry_data: true
 
-    # Test FAIL → Test Loop Counter
+    # Test FAIL or unknown → Test Loop Counter (fallback)
     - from: Tester
       to: Test Loop Counter
       trigger: true
       condition:
         type: keyword
         config:
-          any:
-            - TEST_FAIL
-          none: []
+          any: []
+          none:
+            - TEST_PASS
           regex: []
           case_sensitive: true
       carry_data: true
