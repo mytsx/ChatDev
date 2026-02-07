@@ -228,18 +228,32 @@ graph:
           case_sensitive: true
       carry_data: true
 
-    # Review Loop Counter → Developer (loop back)
+    # Review Loop Counter → Developer (loop back, not exhausted)
     - from: Review Loop Counter
       to: Developer
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
       carry_data: true
 
     # Review Loop Counter → Tester (exit when max reached)
     - from: Review Loop Counter
       to: Tester
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
       carry_data: true
       clear_context: true
 
@@ -271,18 +285,32 @@ graph:
           case_sensitive: true
       carry_data: true
 
-    # Test Loop Counter → Bug Fixer (loop back)
+    # Test Loop Counter → Bug Fixer (loop back, not exhausted)
     - from: Test Loop Counter
       to: Bug Fixer
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
       carry_data: true
 
     # Test Loop Counter → Task Complete (exit when max reached)
     - from: Test Loop Counter
       to: Task Complete
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
       carry_data: true
 
     # Bug Fixer → Tester (re-test after fix)

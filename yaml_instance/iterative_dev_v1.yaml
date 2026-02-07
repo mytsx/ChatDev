@@ -405,14 +405,28 @@ graph:
     - from: Plan Revision Counter
       to: Task Planner
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
       carry_data: true
 
     # Plan revision loop: exhausted → proceed to development
     - from: Plan Revision Counter
       to: Task Iteration
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
       carry_data: true
 
     # ═══ Phase 07 → Phase 08: Development → Integration Test ═══
@@ -456,14 +470,28 @@ graph:
     - from: Integration Fix Counter
       to: Integration Bug Fixer
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
       carry_data: true
 
     # Integration fix loop: exhausted → proceed to Final Review
     - from: Integration Fix Counter
       to: Final Review
       trigger: true
-      condition: 'true'
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
       carry_data: true
 
     # Bug Fixer → re-run Integration Tester

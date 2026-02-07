@@ -8,8 +8,23 @@ from entity.messages import Message, MessageRole
 from runtime.node.executor.base import NodeExecutor
 
 
+# Prefix added to the exhaustion message so downstream edges can
+# distinguish "loop continues" from "loop exhausted".
+LOOP_EXIT_MARKER = "LOOP_EXIT"
+
+
 class LoopCounterNodeExecutor(NodeExecutor):
-    """Track loop iterations and emit output only after hitting the limit."""
+    """Track loop iterations and route based on exhaustion state.
+
+    * **Not exhausted** – passes input messages through unchanged so the
+      "continue loop" edge can fire.
+    * **Exhausted** – emits a message prefixed with ``LOOP_EXIT`` so the
+      "exit loop" edge can fire.
+
+    Downstream edges should use keyword conditions to differentiate:
+    * Continue edge: ``none: [LOOP_EXIT]``
+    * Exit edge:     ``any:  [LOOP_EXIT]``
+    """
 
     STATE_KEY = "loop_counter"
 
@@ -25,14 +40,17 @@ class LoopCounterNodeExecutor(NodeExecutor):
 
         if count < config.max_iterations:
             self.log_manager.debug(
-                f"LoopCounter {node.id}: iteration {count}/{config.max_iterations} (suppress downstream)"
+                f"LoopCounter {node.id}: iteration {count}/{config.max_iterations} (pass-through)"
             )
-            return []
+            # Pass input through so the "continue" edge fires.
+            return list(inputs) if inputs else []
 
+        # --- Exhausted ---
         if config.reset_on_emit:
             counter["count"] = 0
 
-        content = config.message or f"Loop limit reached ({config.max_iterations})"
+        raw_message = config.message or f"Loop limit reached ({config.max_iterations})"
+        content = f"{LOOP_EXIT_MARKER}: {raw_message}"
         metadata = {
             "loop_counter": {
                 "count": count,
@@ -42,7 +60,8 @@ class LoopCounterNodeExecutor(NodeExecutor):
         }
 
         self.log_manager.debug(
-            f"LoopCounter {node.id}: iteration {count}/{config.max_iterations} reached limit, releasing output"
+            f"LoopCounter {node.id}: iteration {count}/{config.max_iterations}"
+            " reached limit, releasing output"
         )
 
         return [Message(
