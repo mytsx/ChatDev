@@ -16,7 +16,8 @@ graph:
     - id: Task Input
       type: passthrough
       description: Receives task specification from the parent workflow.
-      config: {}
+      config:
+        only_last_message: false
 
     - id: Developer
       type: agent
