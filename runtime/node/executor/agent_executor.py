@@ -22,6 +22,7 @@ from entity.messages import (
     FunctionCallOutputEvent,
     Message,
     MessageBlock,
+    MessageBlockType,
     MessageRole,
     ToolCallPayload,
 )
@@ -1055,13 +1056,22 @@ class AgentNodeExecutor(NodeExecutor):
         attachment = block.attachment
         if attachment is None:
             return
+
+        # Ensure kind is always a MessageBlockType enum, not a plain string
+        block_kind = block.type
+        if isinstance(block_kind, str) and not isinstance(block_kind, MessageBlockType):
+            try:
+                block_kind = MessageBlockType(block_kind)
+            except ValueError:
+                block_kind = MessageBlockType.FILE
+
         if attachment.remote_file_id and not attachment.data_uri and not attachment.local_path:
             record = store.register_remote_file(
                 remote_file_id=attachment.remote_file_id,
                 name=attachment.name or attachment.attachment_id or "remote_file",
                 mime_type=attachment.mime_type,
                 size=attachment.size,
-                kind=block.type,
+                kind=block_kind,
                 attachment_id=attachment.attachment_id,
             )
             block.attachment = record.ref
@@ -1093,7 +1103,7 @@ class AgentNodeExecutor(NodeExecutor):
 
         record = store.register_file(
             target_path,
-            kind=block.type,
+            kind=block_kind,
             display_name=attachment.name or target_path.name,
             mime_type=attachment.mime_type,
             attachment_id=attachment.attachment_id,
