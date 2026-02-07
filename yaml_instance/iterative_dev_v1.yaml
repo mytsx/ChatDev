@@ -503,6 +503,4 @@ graph:
     Include: what the application should do, target programming language,
     key features, and any specific requirements.
 
-vars:
-  BASE_URL: ${BASE_URL}
-  API_KEY: ${API_KEY}
+vars: {}
