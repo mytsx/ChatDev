@@ -70,11 +70,23 @@ class SubgraphNodeExecutor(NodeExecutor):
         # process. Nodes in the subgraph (e.g. Start) hold state (inputs/outputs)
         # that must not be shared across threads.
         subgraph = copy.deepcopy(subgraph)
-        
-        # Execute the subgraph (requires importing ``GraphExecutor``)
-        from workflow.graph import GraphExecutor
-        
-        executor = GraphExecutor.execute_graph(subgraph, task_prompt=task_payload)
+
+        # Propagate workspace_path from parent graph to subgraph so that
+        # Claude Code nodes inside the subgraph run in the same directory.
+        parent_workspace = self.context.global_state.get("python_workspace_root")
+        parent_ws_meta = getattr(self.context, "_graph_metadata", None)
+        if parent_workspace and hasattr(subgraph, "config") and hasattr(subgraph.config, "metadata"):
+            subgraph.config.metadata.setdefault("workspace_path", str(parent_workspace))
+
+        # Execute the subgraph.  If the parent graph was launched via a
+        # WebSocket-aware executor it will have stored a factory in
+        # global_state so that subgraph events are also broadcast.
+        factory = self.context.global_state.get("_subgraph_executor_factory")
+        if factory:
+            executor = factory(subgraph, task_payload)
+        else:
+            from workflow.graph import GraphExecutor
+            executor = GraphExecutor.execute_graph(subgraph, task_prompt=task_payload)
         result_messages = executor.get_final_output_messages()
         
         final_results = []

@@ -27,7 +27,7 @@ class AttachmentRecord:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "ref": self.ref.to_dict(),
-            "kind": self.kind.value,
+            "kind": self.kind.value if isinstance(self.kind, MessageBlockType) else str(self.kind),
             "description": self.description,
             "extra": self.extra,
         }

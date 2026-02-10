@@ -1,0 +1,324 @@
+version: 0.4.0
+graph:
+  id: task_iteration
+  description: Inner development loop — implement, code review, test, and bug fix with retry limits.
+  log_level: INFO
+  is_majority_voting: false
+
+  start:
+    - Task Input
+  end:
+    - Task Complete
+
+  memory: []
+
+  nodes:
+    - id: Task Input
+      type: passthrough
+      description: Receives task specification from the parent workflow.
+      config:
+        only_last_message: false
+
+    - id: Developer
+      type: agent
+      description: Implements the task using Claude Code.
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Senior Software Developer. You receive task specifications and implement them fully.
+
+          PROCESS:
+          1. Read existing code files to understand the current codebase state
+          2. Plan your implementation approach
+          3. Implement the required changes step by step
+          4. Ensure code is complete, functional, and follows project conventions
+          5. Save all modified files
+
+          RULES:
+          - Write clean, well-structured code with proper error handling
+          - Implement all methods completely — no stubs or placeholders
+          - Follow existing project conventions and patterns
+          - Create Python virtual environments and install dependencies as needed
+
+          After completing, provide a concise summary of what you implemented.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+
+    - id: Code Reviewer
+      type: agent
+      description: Reviews code for quality, correctness, and completeness.
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Code Reviewer. Examine the developer's code changes thoroughly.
+
+          CHECK LIST:
+          1. Correctness — does the code implement the requirements?
+          2. Code quality — clean, readable, maintainable?
+          3. No bugs or logic errors?
+          4. All methods fully implemented (no stubs/placeholders)?
+          5. Proper error handling?
+          6. Project conventions followed?
+
+          You MUST call the provided functions to read and inspect the source code.
+
+          DECISION (your last line MUST contain one of these):
+          - If code is good: "CODE_PASS: [brief summary of what's good]"
+          - If code needs fixes: "CODE_FAIL: [specific issues with file:line references]"
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+
+    - id: Review Loop Counter
+      type: loop_counter
+      description: Limits code review retry iterations to 3.
+      context_window: 0
+      config:
+        max_iterations: 3
+        reset_on_emit: true
+        message: Maximum review iterations reached. Proceeding to test phase.
+
+    - id: Tester
+      type: agent
+      description: Runs tests and verifies the implemented code.
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Software Tester. Verify that the code works correctly.
+
+          PROCESS:
+          1. Read source code to understand what was implemented
+          2. Run existing tests if available (using uv_run)
+          3. If no tests exist, run the main program to verify basic functionality
+          4. Check for runtime errors, crashes, or incorrect behavior
+
+          IMPORTANT:
+          - Always set a timeout when running code (max 30 seconds)
+          - If the program is a server/GUI app that runs continuously, a timeout is expected
+          - Check stdout/stderr logs: if the app started successfully before timeout, it's a PASS
+
+          DECISION (your last line MUST contain one of these):
+          - If tests pass: "TEST_PASS: [summary of test results]"
+          - If tests fail: "TEST_FAIL: [error details, traceback, what went wrong]"
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+
+    - id: Bug Fixer
+      type: agent
+      description: Fixes specific bugs identified by the tester.
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Bug Fixer. Fix the specific bugs reported by the tester.
+
+          RULES:
+          - Fix ONLY the reported bugs — do NOT rewrite or refactor unrelated code
+          - Make minimal, targeted changes
+          - Save all fixed files
+          - Verify your fix addresses the reported issue
+
+          After fixing, provide a brief summary of what you changed.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+
+    - id: Test Loop Counter
+      type: loop_counter
+      description: Limits test-fix retry iterations to 3.
+      context_window: 0
+      config:
+        max_iterations: 3
+        reset_on_emit: true
+        message: Maximum test-fix iterations reached. Proceeding to completion.
+
+    - id: Task Complete
+      type: passthrough
+      description: Task iteration completed successfully.
+      config: {}
+
+  edges:
+    # Task Input → Developer
+    - from: Task Input
+      to: Developer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      keep_message: false
+
+    # Developer → Code Reviewer
+    - from: Developer
+      to: Code Reviewer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      keep_message: false
+      clear_context: true
+
+    # Code Review PASS → Tester
+    - from: Code Reviewer
+      to: Tester
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - CODE_PASS
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # Code Review FAIL or unknown → Review Loop Counter (fallback)
+    - from: Code Reviewer
+      to: Review Loop Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - CODE_PASS
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Review Loop Counter → Developer (loop back, not exhausted)
+    - from: Review Loop Counter
+      to: Developer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Review Loop Counter → Tester (exit when max reached)
+    - from: Review Loop Counter
+      to: Tester
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # Test PASS → Task Complete
+    - from: Tester
+      to: Task Complete
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - TEST_PASS
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Test FAIL or unknown → Test Loop Counter (fallback)
+    - from: Tester
+      to: Test Loop Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - TEST_PASS
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Test Loop Counter → Bug Fixer (loop back, not exhausted)
+    - from: Test Loop Counter
+      to: Bug Fixer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Test Loop Counter → Task Complete (exit when max reached)
+    - from: Test Loop Counter
+      to: Task Complete
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Bug Fixer → Tester (re-test after fix)
+    - from: Bug Fixer
+      to: Tester
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+  initial_instruction: ''

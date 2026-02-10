@@ -1,0 +1,764 @@
+"""Claude Code provider implementation.
+
+Uses the Claude Code CLI (claude -p) as the LLM backend, leveraging the user's
+Max subscription instead of requiring a separate API key.
+
+Claude Code works in its native agentic mode, using its own built-in tools
+(Write, Edit, Read, Bash) to accomplish tasks like writing code, running tests,
+etc. The provider returns the text result from Claude's work.
+"""
+
+import json
+import os
+import subprocess
+import shutil
+import tempfile
+import threading
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from entity.configs import AgentConfig
+from entity.messages import (
+    Message,
+    MessageRole,
+)
+from entity.tool_spec import ToolSpec
+from runtime.node.agent import ModelProvider, ModelResponse
+from utils.token_tracker import TokenUsage
+
+
+
+class ClaudeCodeProvider(ModelProvider):
+    """Provider that uses Claude Code CLI (claude -p) as the LLM backend.
+
+    This provider calls the `claude` binary via subprocess, using the user's
+    Max subscription. No ANTHROPIC_API_KEY is needed.
+
+    Supports persistent sessions via --resume flag, allowing context to be
+    preserved across multiple calls for the same agent node.
+    """
+
+    # Thread-safe session storage: node_id -> session_id
+    _sessions: Dict[str, str] = {}
+    _sessions_lock = threading.Lock()
+
+    @classmethod
+    def get_session(cls, node_id: str) -> Optional[str]:
+        """Get existing session ID for a node."""
+        with cls._sessions_lock:
+            return cls._sessions.get(node_id)
+
+    @classmethod
+    def set_session(cls, node_id: str, session_id: str) -> None:
+        """Store session ID for a node."""
+        with cls._sessions_lock:
+            cls._sessions[node_id] = session_id
+
+    @classmethod
+    def clear_session(cls, node_id: str) -> None:
+        """Clear session for a specific node."""
+        with cls._sessions_lock:
+            cls._sessions.pop(node_id, None)
+
+    @classmethod
+    def clear_all_sessions(cls) -> None:
+        """Clear all sessions (call when workflow completes)."""
+        with cls._sessions_lock:
+            cls._sessions.clear()
+
+    @classmethod
+    def save_sessions_to_workspace(cls, workspace_root: str) -> None:
+        """Persist current sessions to workspace for future continuation."""
+        path = Path(workspace_root) / ".claude_sessions.json"
+        with cls._sessions_lock:
+            if cls._sessions:
+                path.write_text(json.dumps(cls._sessions))
+
+    @classmethod
+    def load_sessions_from_workspace(cls, workspace_root: str) -> None:
+        """Load previously saved sessions from workspace."""
+        path = Path(workspace_root) / ".claude_sessions.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                with cls._sessions_lock:
+                    cls._sessions.update(data)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    def __init__(self, config: AgentConfig):
+        super().__init__(config)
+        self._claude_binary = self._find_claude_binary()
+        self._model_flag = self._resolve_model_flag()
+
+    def _find_claude_binary(self) -> str:
+        """Locate the claude binary."""
+        path = shutil.which("claude")
+        if path:
+            return path
+        for candidate in [
+            "/usr/local/bin/claude",
+            "/opt/homebrew/bin/claude",
+            os.path.expanduser("~/.local/bin/claude"),
+        ]:
+            if os.path.isfile(candidate):
+                return candidate
+        raise FileNotFoundError(
+            "Claude Code CLI not found. Install it or ensure 'claude' is in PATH."
+        )
+
+    def _resolve_model_flag(self) -> Optional[str]:
+        """Map model name to claude CLI --model flag."""
+        name = (self.model_name or "").lower().strip()
+        if not name or name in ("claude", "default"):
+            return None
+        # claude CLI accepts: sonnet, opus, haiku, or full model IDs
+        if name in ("sonnet", "opus", "haiku"):
+            return name
+        if "opus" in name:
+            return "opus"
+        if "sonnet" in name:
+            return "sonnet"
+        if "haiku" in name:
+            return "haiku"
+        return name
+
+    def create_client(self):
+        """Return the claude binary path as the 'client'."""
+        return self._claude_binary
+
+    def call_model(
+        self,
+        client: str,
+        conversation: List[Message],
+        timeline: List[Any],
+        tool_specs: Optional[List[ToolSpec]] = None,
+        **kwargs,
+    ) -> ModelResponse:
+        """Call Claude Code CLI with the conversation and tool specs.
+
+        Claude Code works in native agentic mode — it uses its own built-in
+        tools (Write, Edit, Read, Bash) to accomplish tasks. The working
+        directory is set to the workspace root so files are created in the
+        correct location.
+
+        Uses --output-format stream-json with subprocess.Popen for real-time
+        streaming of tool events to the UI via stream_callback.
+
+        Supports persistent sessions via --resume flag when node_id is available.
+        """
+        stream_callback = kwargs.pop("stream_callback", None)
+        session_id = kwargs.pop("session_id", "")
+        server_port = kwargs.pop("server_port", 8000)
+        node_id = getattr(self.config, "node_id", None)
+        workspace_root = getattr(self.config, "workspace_root", None)
+
+        # Check for existing session
+        existing_session = self.get_session(node_id) if node_id else None
+        is_continuation = existing_session is not None
+
+        # Create MCP config for chatdev-reporter
+        mcp_config_path = self._create_mcp_config(
+            node_id or "", session_id, server_port,
+        ) if session_id else None
+
+        # Build prompt (simplified for continuations)
+        prompt = self._build_prompt(
+            conversation, tool_specs,
+            is_continuation=is_continuation,
+            workspace_root=workspace_root,
+        )
+
+        cmd = [client, "-p", prompt, "--output-format", "stream-json"]
+
+        # --verbose is required when using --output-format stream-json with -p
+        # (print) mode.  Without it Claude CLI exits with an error.
+        cmd.append("--verbose")
+
+        # Skip all permission checks for non-interactive mode.
+        # Without this, -p mode blocks on permission prompts and produces
+        # empty output.
+        cmd.append("--dangerously-skip-permissions")
+
+        # Resume existing session or start new one
+        if existing_session:
+            cmd.extend(["--resume", existing_session])
+            cmd.extend(["--max-turns", "20"])
+        else:
+            cmd.extend(["--max-turns", "15"])
+
+        if mcp_config_path:
+            cmd.extend(["--mcp-config", mcp_config_path])
+
+        if self._model_flag:
+            cmd.extend(["--model", self._model_flag])
+
+        # Set CWD to workspace root so Claude's file operations land in the
+        # correct directory. Ensure the directory exists.
+        cwd = None
+        if workspace_root:
+            ws_path = Path(workspace_root)
+            ws_path.mkdir(parents=True, exist_ok=True)
+            cwd = str(ws_path)
+
+        # Snapshot workspace before Claude Code runs so we can diff afterwards
+        before_snapshot = self._snapshot_workspace(cwd) if cwd else {}
+
+        timeout = kwargs.pop("timeout", 600)
+
+        try:
+            raw_response, stderr_text = self._run_streaming(
+                cmd, cwd, timeout, stream_callback,
+            )
+
+            if raw_response.get("error") == "timeout":
+                if node_id and not existing_session:
+                    self.clear_session(node_id)
+                return ModelResponse(
+                    message=Message(
+                        role=MessageRole.ASSISTANT,
+                        content="[Error: Claude Code CLI timed out]",
+                    ),
+                    raw_response=raw_response,
+                )
+
+            self._track_token_usage(raw_response)
+
+            # Check for session resume errors and retry without --resume
+            error_msg = raw_response.get("error", "")
+            if existing_session and error_msg and ("session" in error_msg.lower() or "resume" in error_msg.lower()):
+                # Session expired or invalid - clear it and retry without resume
+                if node_id:
+                    self.clear_session(node_id)
+
+                # Retry without --resume flag
+                cmd_retry = [client, "-p", prompt, "--output-format", "stream-json"]
+                cmd_retry.append("--verbose")
+                cmd_retry.append("--dangerously-skip-permissions")
+                cmd_retry.extend(["--max-turns", "15"])
+                if mcp_config_path:
+                    cmd_retry.extend(["--mcp-config", mcp_config_path])
+                if self._model_flag:
+                    cmd_retry.extend(["--model", self._model_flag])
+
+                raw_response, stderr_text = self._run_streaming(
+                    cmd_retry, cwd, timeout, stream_callback,
+                )
+
+                if raw_response.get("error") == "timeout":
+                    return ModelResponse(
+                        message=Message(
+                            role=MessageRole.ASSISTANT,
+                            content="[Error: Claude Code CLI timed out on retry]",
+                        ),
+                        raw_response=raw_response,
+                    )
+
+                self._track_token_usage(raw_response)
+
+            # Diff workspace to detect files created/modified by Claude Code
+            if cwd:
+                after_snapshot = self._snapshot_workspace(cwd)
+                raw_response["file_changes"] = self._diff_workspace(
+                    before_snapshot, after_snapshot,
+                )
+
+            # Mark whether streaming was active so executor can skip duplicate logs
+            if stream_callback is not None:
+                raw_response["_streamed"] = True
+
+            # Save session ID for future calls (persistent session support)
+            new_session_id = raw_response.get("session_id")
+            if new_session_id and node_id:
+                self.set_session(node_id, new_session_id)
+                # Also persist to workspace for cross-session continuation
+                if cwd:
+                    self.save_sessions_to_workspace(cwd)
+
+            return self._build_stream_response(raw_response, stderr_text)
+        finally:
+            self._cleanup_mcp_config(mcp_config_path)
+
+    # ------------------------------------------------------------------
+    # Streaming helpers
+    # ------------------------------------------------------------------
+
+    def _run_streaming(
+        self,
+        cmd: List[str],
+        cwd: Optional[str],
+        timeout: int,
+        stream_callback: Optional[Any],
+    ) -> tuple:
+        """Run Claude Code CLI with Popen, parse NDJSON stream in real time.
+
+        Returns (raw_response_dict, stderr_text).
+        """
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            cwd=cwd,
+        )
+
+        timed_out = False
+
+        def _kill():
+            nonlocal timed_out
+            timed_out = True
+            process.kill()
+
+        timer = threading.Timer(timeout, _kill)
+        timer.start()
+
+        accumulated_text: List[str] = []
+        session_id: Optional[str] = None
+        result_data: dict = {}
+        pending_tool: Optional[dict] = None
+
+        try:
+            for line in process.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                event_type = event.get("type")
+
+                if event_type == "system":
+                    session_id = event.get("session_id") or session_id
+
+                elif event_type == "assistant":
+                    msg = event.get("message", {})
+                    content_blocks = msg.get("content", [])
+                    for block in content_blocks:
+                        if block.get("type") == "tool_use":
+                            # Close previous tool if any
+                            if pending_tool and stream_callback:
+                                stream_callback("tool_end", pending_tool)
+                            # Emit new tool start
+                            pending_tool = {
+                                "name": block.get("name", "unknown"),
+                                "input": block.get("input", {}),
+                                "id": block.get("id"),
+                            }
+                            if stream_callback:
+                                stream_callback("tool_start", pending_tool)
+                        elif block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                accumulated_text.append(text)
+                            # Text after a tool means tool finished
+                            if pending_tool and stream_callback:
+                                stream_callback("tool_end", pending_tool)
+                                pending_tool = None
+
+                elif event_type == "user":
+                    # User events with tool_result indicate tool completion.
+                    # This is a more reliable tool_end signal than text blocks.
+                    msg = event.get("message", {})
+                    content_blocks = msg.get("content", [])
+                    for block in content_blocks:
+                        if block.get("type") == "tool_result":
+                            result_content = block.get("content", "")
+                            if pending_tool and stream_callback:
+                                pending_tool["result"] = (
+                                    result_content
+                                    if isinstance(result_content, str)
+                                    else str(result_content)[:200]
+                                )
+                                stream_callback("tool_end", pending_tool)
+                                pending_tool = None
+
+                elif event_type == "result":
+                    # Close last pending tool
+                    if pending_tool and stream_callback:
+                        stream_callback("tool_end", pending_tool)
+                        pending_tool = None
+                    result_data = event
+                    session_id = event.get("session_id") or session_id
+
+        finally:
+            timer.cancel()
+            process.wait()
+
+        stderr_text = ""
+        try:
+            stderr_text = process.stderr.read() if process.stderr else ""
+        except Exception:
+            pass
+
+        if timed_out:
+            return {"error": "timeout"}, stderr_text
+
+        # Build raw_response from stream data
+        raw_response = self._parse_stream_result(
+            result_data, accumulated_text, session_id,
+        )
+        raw_response["_returncode"] = process.returncode
+        return raw_response, stderr_text
+
+    def _parse_stream_result(
+        self,
+        result_data: dict,
+        accumulated_text: List[str],
+        session_id: Optional[str],
+    ) -> dict:
+        """Build a raw_response dict from streamed data, compatible with
+        the format returned by _parse_cli_output for non-stream mode."""
+        if result_data:
+            # result event already has the shape we need
+            raw = dict(result_data)
+            # Ensure result text is populated
+            if not raw.get("result") and accumulated_text:
+                raw["result"] = "\n".join(accumulated_text)
+            if session_id:
+                raw.setdefault("session_id", session_id)
+            return raw
+
+        # No result event received — fallback
+        return {
+            "result": "\n".join(accumulated_text) if accumulated_text else "",
+            "session_id": session_id,
+            "type": "result",
+        }
+
+    def _build_stream_response(
+        self, raw_response: dict, stderr_text: str,
+    ) -> ModelResponse:
+        """Build ModelResponse from streaming raw_response."""
+        response_text = raw_response.get("result", "")
+        if not response_text and stderr_text:
+            response_text = f"[Claude Code Error]: {stderr_text[:500]}"
+        return ModelResponse(
+            message=Message(role=MessageRole.ASSISTANT, content=response_text),
+            raw_response=raw_response,
+        )
+
+    def extract_token_usage(self, response: Any) -> TokenUsage:
+        """Extract token usage from Claude Code CLI JSON response."""
+        if not isinstance(response, dict):
+            return TokenUsage()
+
+        usage = response.get("usage", {}) or {}
+        cost = response.get("total_cost_usd", 0) or 0
+
+        # Try modelUsage for detailed per-model breakdown
+        model_usage = response.get("modelUsage", {})
+        if model_usage and not usage.get("input_tokens"):
+            for _model, stats in model_usage.items():
+                input_tokens = stats.get("inputTokens", 0)
+                output_tokens = stats.get("outputTokens", 0)
+                return TokenUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
+                    metadata={"total_cost_usd": cost, **stats},
+                )
+
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+
+        return TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            metadata={"total_cost_usd": cost},
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _track_token_usage(self, raw_response: dict) -> None:
+        """Record token usage if a tracker is attached."""
+        token_tracker = getattr(self.config, "token_tracker", None)
+        if not token_tracker:
+            return
+
+        usage = self.extract_token_usage(raw_response)
+        node_id = getattr(self.config, "node_id", "ALL")
+        usage.node_id = node_id
+        usage.model_name = self.model_name
+        usage.workflow_id = token_tracker.workflow_id
+        usage.provider = "claude-code"
+
+        token_tracker.record_usage(
+            node_id, self.model_name, usage, provider="claude-code"
+        )
+
+    def _build_prompt(
+        self,
+        conversation: List[Message],
+        tool_specs: Optional[List[ToolSpec]],
+        is_continuation: bool = False,
+        workspace_root: Optional[Any] = None,
+    ) -> str:
+        """Build a single prompt string from conversation messages.
+
+        When is_continuation=True (resuming an existing session), the prompt
+        is simplified since system instructions and prior context are already
+        in Claude's memory. Only new user/tool messages are sent.
+        """
+        parts: List[str] = []
+
+        if is_continuation:
+            for msg in conversation:
+                text = msg.text_content()
+                if msg.role == MessageRole.USER:
+                    parts.append(f"[User]:\n{text}")
+                elif msg.role == MessageRole.TOOL:
+                    tool_name = msg.metadata.get("tool_name", "unknown")
+                    call_id = msg.tool_call_id or "unknown"
+                    parts.append(
+                        f"[Tool Result for '{tool_name}' (call_id: {call_id})]:\n{text}"
+                    )
+        else:
+            for msg in conversation:
+                text = msg.text_content()
+                if msg.role == MessageRole.SYSTEM:
+                    parts.append(f"[System Instructions]:\n{text}")
+                elif msg.role == MessageRole.USER:
+                    parts.append(f"[User]:\n{text}")
+                elif msg.role == MessageRole.ASSISTANT:
+                    parts.append(f"[Assistant]:\n{text}")
+                elif msg.role == MessageRole.TOOL:
+                    tool_name = msg.metadata.get("tool_name", "unknown")
+                    call_id = msg.tool_call_id or "unknown"
+                    parts.append(
+                        f"[Tool Result for '{tool_name}' (call_id: {call_id})]:\n{text}"
+                    )
+
+        if tool_specs and not is_continuation:
+            parts.append(self._format_tool_specs(tool_specs, workspace_root))
+
+        if workspace_root and not is_continuation:
+            parts.append(
+                f"[Working Directory]: {workspace_root}\n"
+                "Your current working directory is set to the project workspace above. "
+                "All files you create with your Write tool will be saved there. "
+                "Use relative paths (e.g. 'main.py', 'src/utils.py') for all file operations."
+            )
+
+        if not is_continuation:
+            parts.append(
+                "[Progress Reporting]:\n"
+                "You have a report_progress MCP tool available. Call it at natural "
+                "transition points (e.g. after analyzing requirements, before starting "
+                "implementation, after writing key files, before/after running tests). "
+                "Keep reports concise (1-2 sentences). Do NOT over-report — 2-5 calls "
+                "per session is ideal. If reporting fails, continue your work normally."
+            )
+
+        return "\n\n".join(parts)
+
+    def _format_tool_specs(
+        self, tool_specs: List[ToolSpec], workspace_root: Optional[Any] = None,
+    ) -> str:
+        """Format tool specs as guidance for Claude's native tools.
+
+        Maps ChatDev tool capabilities to Claude Code's built-in tools so
+        Claude knows what actions are expected and how to accomplish them.
+        """
+        # Build a mapping from ChatDev tools to Claude Code native actions
+        tool_mappings: List[str] = []
+        for spec in tool_specs:
+            name = spec.name
+            desc = spec.description or ""
+            if "save_file" in name or "write" in name.lower():
+                tool_mappings.append(
+                    f"- {name}: {desc}\n"
+                    "  -> Use your Write tool to create/save files with relative paths."
+                )
+            elif "read_file" in name or "read" in name.lower():
+                tool_mappings.append(
+                    f"- {name}: {desc}\n"
+                    "  -> Use your Read tool to read file contents."
+                )
+            elif "run" in name.lower() or "exec" in name.lower() or "bash" in name.lower():
+                tool_mappings.append(
+                    f"- {name}: {desc}\n"
+                    "  -> Use your Bash tool to execute commands."
+                )
+            else:
+                tool_mappings.append(f"- {name}: {desc}")
+
+        lines = [
+            "[Task Capabilities — Native Tool Mapping]:",
+            "You have built-in tools: Write, Edit, Read, Bash.",
+            "The following tasks are expected. Use your tools directly to accomplish them:",
+            "",
+        ]
+        lines.extend(tool_mappings)
+        lines.append("")
+        lines.append(
+            "CRITICAL: Create all files using your Write tool with RELATIVE paths "
+            "(e.g. 'main.py', not absolute paths). "
+            "Your working directory is already set to the project workspace."
+        )
+        if workspace_root:
+            lines.append(f"Workspace: {workspace_root}")
+        return "\n".join(lines)
+
+    def _parse_text_response(
+        self, raw_response: dict, result: subprocess.CompletedProcess
+    ) -> ModelResponse:
+        """Parse plain text response (no tools mode)."""
+        response_text = raw_response.get("result", "")
+        if not response_text and result.stderr:
+            response_text = f"[Claude Code Error]: {result.stderr[:500]}"
+        return ModelResponse(
+            message=Message(role=MessageRole.ASSISTANT, content=response_text),
+            raw_response=raw_response,
+        )
+
+    # ------------------------------------------------------------------
+    # MCP config helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _create_mcp_config(
+        node_id: str,
+        session_id: str,
+        server_port: int,
+    ) -> Optional[str]:
+        """Create a temporary MCP config JSON file for the chatdev-reporter server.
+
+        Returns the path to the temp file, or None if creation fails.
+        """
+        try:
+            mcp_server_path = str(
+                Path(__file__).resolve().parents[4]
+                / "mcp_servers"
+                / "chatdev_reporter.py"
+            )
+            if not Path(mcp_server_path).exists():
+                return None
+
+            config = {
+                "mcpServers": {
+                    "chatdev-reporter": {
+                        "command": "python",
+                        "args": [mcp_server_path],
+                        "env": {
+                            "CHATDEV_SERVER_URL": f"http://127.0.0.1:{server_port}",
+                            "CHATDEV_SESSION_ID": session_id,
+                            "CHATDEV_NODE_ID": node_id,
+                        },
+                    }
+                }
+            }
+
+            fd, path = tempfile.mkstemp(suffix=".json", prefix="chatdev_mcp_")
+            with os.fdopen(fd, "w") as f:
+                json.dump(config, f)
+            return path
+        except Exception:
+            return None
+
+    @staticmethod
+    def _cleanup_mcp_config(config_path: Optional[str]) -> None:
+        """Remove a temporary MCP config file."""
+        if config_path:
+            try:
+                os.unlink(config_path)
+            except OSError:
+                pass
+
+    # ------------------------------------------------------------------
+    # Workspace scanning helpers
+    # ------------------------------------------------------------------
+
+    _SCAN_EXCLUDE_DIRS = frozenset({
+        "__pycache__", ".git", ".venv", "venv", "node_modules",
+        ".mypy_cache", ".pytest_cache", "attachments",
+    })
+
+    _SCAN_EXCLUDE_FILES = frozenset({
+        "firebase-debug.log",
+        ".DS_Store",
+        "Thumbs.db",
+        "desktop.ini",
+    })
+
+    def _snapshot_workspace(self, workspace_root: str) -> Dict[str, tuple]:
+        """Take a lightweight snapshot of workspace files.
+
+        Returns a dict of ``{relative_path: (size, mtime_ns)}``.
+        """
+        snapshot: Dict[str, tuple] = {}
+        root = Path(workspace_root)
+        if not root.exists():
+            return snapshot
+
+        for item in root.rglob("*"):
+            if not item.is_file():
+                continue
+            rel = item.relative_to(root)
+            # Skip hidden and excluded directories
+            if any(
+                part.startswith(".") or part in self._SCAN_EXCLUDE_DIRS
+                for part in rel.parts[:-1]  # check parent dirs, not filename
+            ):
+                continue
+            # Skip excluded files (e.g., firebase-debug.log, .DS_Store)
+            if rel.name in self._SCAN_EXCLUDE_FILES:
+                continue
+            try:
+                st = item.stat()
+                snapshot[str(rel)] = (st.st_size, st.st_mtime_ns)
+            except OSError:
+                continue
+        return snapshot
+
+    @staticmethod
+    def _diff_workspace(
+        before: Dict[str, tuple],
+        after: Dict[str, tuple],
+    ) -> List[Dict[str, Any]]:
+        """Compare two workspace snapshots and return a list of changes."""
+        changes: List[Dict[str, Any]] = []
+        for path, (size, mtime) in after.items():
+            if path not in before:
+                changes.append({"path": path, "change": "created", "size": size})
+            elif before[path] != (size, mtime):
+                changes.append({"path": path, "change": "modified", "size": size})
+        for path in before:
+            if path not in after:
+                changes.append({"path": path, "change": "deleted", "size": 0})
+        return changes
+
+    def _parse_cli_output(self, result: subprocess.CompletedProcess) -> dict:
+        """Parse the JSON output from claude CLI."""
+        stdout = result.stdout or ""
+        if not stdout.strip():
+            return {
+                "result": "",
+                "error": result.stderr or "empty response",
+                "returncode": result.returncode,
+            }
+
+        # Single JSON object (normal --output-format json)
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError:
+            pass
+
+        # Stream mode: try last result-type line
+        for line in reversed(stdout.strip().splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+                if isinstance(parsed, dict) and parsed.get("type") == "result":
+                    return parsed
+            except json.JSONDecodeError:
+                continue
+
+        return {"result": stdout.strip(), "type": "text_fallback"}

@@ -1,0 +1,550 @@
+version: 0.4.0
+
+graph:
+  id: iterative_dev_v1
+  description: >
+    10-phase iterative software development workflow.
+    Requirements analysis → Task planning → Human approval → Development loop
+    (code, review, test, fix) → Final human review → Documentation & delivery.
+  log_level: INFO
+  is_majority_voting: false
+
+  start:
+    - USER
+    - Requirements Analyst
+  end:
+    - Delivery Summary
+
+  memory: []
+
+  nodes:
+    # ── Phase 01: Requirement Analysis ──────────────────────────────
+    - id: USER
+      type: passthrough
+      description: Carries the original user task prompt to all agents that need it.
+      context_window: 0
+      config: {}
+
+    - id: Requirements Analyst
+      type: agent
+      description: "Phase 01 — Analyzes user requirements and produces a structured specification."
+      context_window: 0
+      config:
+        provider: openai
+        name: gpt-4o
+        base_url: ${BASE_URL}
+        api_key: ${API_KEY}
+        role: |
+          You are a Requirements Analyst and Software Architect.
+          Analyze the user's project request and produce a clear, structured specification.
+
+          OUTPUT FORMAT:
+          ## Project Overview
+          [1-2 sentence summary]
+
+          ## Functional Requirements
+          1. [Requirement with acceptance criteria]
+          2. ...
+
+          ## Technical Requirements
+          - Programming Language: [language]
+          - Key Libraries/Frameworks: [list]
+          - Architecture: [brief description]
+
+          ## Constraints & Assumptions
+          - [Any constraints or assumptions]
+
+          ## Success Criteria
+          - [How we know the project is complete]
+
+          Be specific and actionable. Avoid vague requirements.
+        params:
+          temperature: 0.2
+          max_tokens: 2000
+
+    # ── Phase 02: Task Planning ─────────────────────────────────────
+    - id: Task Planner
+      type: agent
+      description: "Phase 02 — Breaks requirements into an ordered list of implementation tasks."
+      context_window: 0
+      config:
+        provider: openai
+        name: gpt-4o
+        base_url: ${BASE_URL}
+        api_key: ${API_KEY}
+        role: |
+          You are a Technical Project Planner.
+          Based on the requirements specification, create a detailed, ordered task plan.
+
+          OUTPUT FORMAT:
+          ## Implementation Plan
+
+          ### Task 1: [Title]
+          **Description:** [What to implement]
+          **Files:** [Files to create/modify]
+          **Dependencies:** [What must exist first]
+          **Acceptance:** [How to verify completion]
+
+          ### Task 2: [Title]
+          ...
+
+          ## Execution Order
+          [Ordered list: Task 1 → Task 2 → ...]
+
+          ## Estimated Complexity
+          - Total tasks: [N]
+          - Critical path: [which tasks are sequential vs parallelizable]
+
+          RULES:
+          - Each task should be independently testable
+          - Order tasks by dependency (foundational first)
+          - Keep tasks focused — one concern per task
+          - Include setup tasks (environment, dependencies) first
+        params:
+          temperature: 0.2
+          max_tokens: 3000
+
+    # ── Phase 03: Plan Approval (Human) ─────────────────────────────
+    - id: Plan Approval
+      type: human
+      description: "Phase 03 — User reviews the task plan and approves or requests revisions."
+      context_window: 0
+      config:
+        description: |
+          Review the implementation plan above.
+
+          → Type "approve" to proceed with development.
+          → Or provide revision feedback to update the plan.
+
+    - id: Plan Revision Counter
+      type: loop_counter
+      description: Limits plan revision cycles to 2.
+      context_window: 0
+      config:
+        max_iterations: 2
+        reset_on_emit: true
+        message: Maximum plan revisions reached. Proceeding with current plan.
+
+    # ── Phases 04-07: Development Iteration (Subgraph) ──────────────
+    - id: Task Iteration
+      type: subgraph
+      description: "Phases 04-07 — Development inner loop: implement, review, test, fix."
+      config:
+        type: file
+        config:
+          path: "subgraphs/task_iteration.yaml"
+
+    # ── Phase 08: Integration Test ──────────────────────────────────
+    - id: Integration Tester
+      type: agent
+      description: "Phase 08 — Runs integration tests on the complete project."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a QA Engineer. Run comprehensive integration tests on the complete project.
+
+          PROCESS:
+          1. Read all source code files to understand the full project
+          2. Run the test suite if one exists (using uv_run with timeout)
+          3. If no test suite, run the main application and verify it starts correctly
+          4. Check that all major features work together
+          5. Verify no import errors, missing dependencies, or broken integrations
+
+          IMPORTANT:
+          - Set timeout of 30 seconds for all code execution
+          - If the app is a server/GUI, timeout is expected — check logs for successful startup
+
+          DECISION (your last line MUST contain one of these):
+          - All good: "INT_PASS: [summary of what was tested and verified]"
+          - Issues found: "INT_FAIL: [specific integration issues found]"
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+
+    - id: Integration Fix Counter
+      type: loop_counter
+      description: Limits integration fix iterations to 2.
+      context_window: 0
+      config:
+        max_iterations: 2
+        reset_on_emit: true
+        message: Maximum integration fix iterations reached. Proceeding to review.
+
+    - id: Integration Bug Fixer
+      type: agent
+      description: Fixes integration-level bugs found by the QA engineer.
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are an Integration Bug Fixer. Fix the integration issues reported by the QA engineer.
+
+          RULES:
+          - Fix ONLY the reported integration issues
+          - Make minimal, targeted changes
+          - Ensure fixes don't break existing functionality
+          - Save all modified files
+
+          After fixing, summarize what you changed.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+
+    # ── Phase 09: Final Review (Human) ──────────────────────────────
+    - id: Final Review
+      type: human
+      description: "Phase 09 — User reviews the completed project and approves or requests changes."
+      context_window: 0
+      config:
+        description: |
+          The project development and testing are complete.
+          Review the results above.
+
+          → Type "approve" to generate documentation and finish.
+          → Or provide feedback for additional changes.
+
+    # ── Phase 10: Documentation & Delivery ──────────────────────────
+    - id: Documentation Writer
+      type: agent
+      description: "Phase 10a — Generates project documentation."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Technical Writer. Generate comprehensive project documentation.
+
+          PROCESS:
+          1. Read all source code files
+          2. Create a README.md with:
+             - Project overview
+             - Installation instructions (dependencies, environment setup)
+             - Usage instructions (how to run, API endpoints if applicable)
+             - Project structure (file descriptions)
+             - Configuration options
+          3. Save the README.md file
+
+          Write clear, user-friendly documentation that someone new to the project can follow.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+
+    - id: Delivery Summary
+      type: agent
+      description: "Phase 10b — Produces a final delivery summary."
+      context_window: 0
+      config:
+        provider: openai
+        name: gpt-4o
+        base_url: ${BASE_URL}
+        api_key: ${API_KEY}
+        role: |
+          You are the Project Delivery Manager. Produce a final delivery summary.
+
+          OUTPUT FORMAT:
+          ## Delivery Summary
+
+          ### What Was Built
+          [Brief description of the completed project]
+
+          ### Features Implemented
+          1. [Feature] — [status: complete/partial]
+          2. ...
+
+          ### Files Created/Modified
+          - [file path] — [purpose]
+          - ...
+
+          ### How to Run
+          [Step-by-step instructions]
+
+          ### Known Limitations
+          - [Any known issues or incomplete items]
+
+          ### Next Steps (Recommendations)
+          - [Suggested improvements or future work]
+
+          Be concise and factual. Focus on what was delivered.
+        params:
+          temperature: 0.1
+          max_tokens: 2000
+
+  edges:
+    # ═══ Phase 01 → Phase 02: Requirements → Planning ═══
+    - from: Requirements Analyst
+      to: Task Planner
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      keep_message: false
+
+    # USER context propagation (kept in memory for all agents)
+    - from: USER
+      to: Requirements Analyst
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Task Planner
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Integration Tester
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Integration Bug Fixer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Documentation Writer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Delivery Summary
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # ═══ Phase 02 → Phase 03: Planning → Human Approval ═══
+    - from: Task Planner
+      to: Plan Approval
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      keep_message: false
+
+    # Task Planner output → Task Iteration (keep in memory so Developer sees the plan)
+    - from: Task Planner
+      to: Task Iteration
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # Requirements Analyst output → Task Iteration (keep in memory for context)
+    - from: Requirements Analyst
+      to: Task Iteration
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # ═══ Phase 03 → Phase 04: Approval routing ═══
+    # User approves → proceed to development
+    - from: Plan Approval
+      to: Task Iteration
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - approve
+            - onay
+            - tamam
+          none: []
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # User wants revision → back to Task Planner (via loop counter)
+    - from: Plan Approval
+      to: Plan Revision Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - approve
+            - onay
+            - tamam
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # Plan revision loop: not exhausted → back to Task Planner
+    - from: Plan Revision Counter
+      to: Task Planner
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Plan revision loop: exhausted → proceed to development
+    - from: Plan Revision Counter
+      to: Task Iteration
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # ═══ Phase 07 → Phase 08: Development → Integration Test ═══
+    - from: Task Iteration
+      to: Integration Tester
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    # ═══ Phase 08: Integration test routing ═══
+    # Integration test PASS → Final Review
+    - from: Integration Tester
+      to: Final Review
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - INT_PASS
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Integration test FAIL or unknown → Integration Fix Counter (fallback)
+    - from: Integration Tester
+      to: Integration Fix Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - INT_PASS
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Integration fix loop: not exhausted → Bug Fixer
+    - from: Integration Fix Counter
+      to: Integration Bug Fixer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - LOOP_EXIT
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Integration fix loop: exhausted → proceed to Final Review
+    - from: Integration Fix Counter
+      to: Final Review
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - LOOP_EXIT
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Bug Fixer → re-run Integration Tester
+    - from: Integration Bug Fixer
+      to: Integration Tester
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    # ═══ Phase 09: Final Review routing ═══
+    # User approves → Documentation
+    - from: Final Review
+      to: Documentation Writer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any:
+            - approve
+            - onay
+            - tamam
+          none: []
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # User wants changes → back to Task Planner
+    - from: Final Review
+      to: Task Planner
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none:
+            - approve
+            - onay
+            - tamam
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # ═══ Phase 10: Documentation → Delivery ═══
+    - from: Documentation Writer
+      to: Delivery Summary
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+  initial_instruction: >
+    Describe the software project you want to build.
+    Include: what the application should do, target programming language,
+    key features, and any specific requirements.
+
+vars: {}

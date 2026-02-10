@@ -10,6 +10,7 @@ Responsible for running agent nodes, including
 import asyncio
 import base64
 import json
+import os
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -21,6 +22,7 @@ from entity.messages import (
     FunctionCallOutputEvent,
     Message,
     MessageBlock,
+    MessageBlockType,
     MessageRole,
     ToolCallPayload,
 )
@@ -65,6 +67,7 @@ class AgentNodeExecutor(NodeExecutor):
 
             agent_config.token_tracker = self.context.get_token_tracker()
             agent_config.node_id = node.id
+            agent_config.workspace_root = self.context.global_state.get("python_workspace_root")
 
             input_data = self._inputs_to_text(inputs)
             input_payload = self._build_thinking_payload_from_inputs(inputs, input_data)
@@ -100,13 +103,20 @@ class AgentNodeExecutor(NodeExecutor):
                     input_mode,
                 )
 
-            self._apply_memory_retrieval(
-                node,
-                conversation,
-                memory_query_snapshot,
-                AgentExecFlowStage.GEN_STAGE,
-                input_mode,
+            # Skip memory retrieval if configured (e.g., claude-code with persistent sessions)
+            should_skip_memory = (
+                agent_config.provider == "claude-code" and
+                getattr(agent_config, "skip_memory", False)
             )
+
+            if not should_skip_memory:
+                self._apply_memory_retrieval(
+                    node,
+                    conversation,
+                    memory_query_snapshot,
+                    AgentExecFlowStage.GEN_STAGE,
+                    input_mode,
+                )
 
             timeline = self._build_initial_timeline(conversation)
             response_obj = self._invoke_provider(
@@ -133,6 +143,11 @@ class AgentNodeExecutor(NodeExecutor):
             else:
                 response_message = response_obj.message
 
+            # Emit synthetic tool-call logs for files created/modified by
+            # Claude Code so the UI shows tool activity and file operations.
+            if agent_config.provider == "claude-code":
+                self._emit_claude_code_file_changes(node, response_obj, response_message)
+
             self._persist_message_attachments(response_message, node.id)
 
             final_message: Message | str = response_message
@@ -150,7 +165,9 @@ class AgentNodeExecutor(NodeExecutor):
                     input_mode,
                 )
 
-            self._update_memory(node, input_data, inputs, final_message)
+            # Skip memory update if configured (e.g., claude-code with persistent sessions)
+            if not should_skip_memory:
+                self._update_memory(node, input_data, inputs, final_message)
 
             if isinstance(final_message, Message):
                 return [self._clone_with_source(final_message, node.id)]
@@ -270,13 +287,72 @@ class AgentNodeExecutor(NodeExecutor):
         agent_config = node.as_config(AgentConfig)
         retry_policy = self._resolve_retry_policy(node, agent_config)
 
+        extra_kwargs: Dict[str, Any] = {}
+
+        # Build a real-time stream callback for Claude Code provider so tool
+        # events (Write, Edit, Bash, etc.) appear in the UI as they happen.
+        if agent_config and agent_config.provider == "claude-code":
+            def _stream_callback(event_type: str, data: dict) -> None:
+                tool_name = data.get("name", "unknown")
+                tool_input = data.get("input", {})
+                display_name = f"claude:{tool_name}"
+
+                # Extract file path for display (Write/Edit/Read use file_path)
+                file_path = tool_input.get("file_path", tool_input.get("path", ""))
+                if file_path:
+                    # Show relative path only for readability
+                    parts = file_path.rsplit("/", 1)
+                    short_path = parts[-1] if parts else file_path
+                else:
+                    short_path = ""
+
+                if event_type == "tool_start":
+                    desc = f"Executing {tool_name}"
+                    if short_path:
+                        desc += f": {short_path}"
+                    self.log_manager.record_tool_call(
+                        node.id,
+                        display_name,
+                        success=True,
+                        tool_result=f"{desc}...",
+                        details={
+                            "arguments": tool_input,
+                            "tool_name": display_name,
+                            "streaming": True,
+                        },
+                        stage=CallStage.BEFORE,
+                    )
+                elif event_type == "tool_end":
+                    # Use tool result from user event if available
+                    result_text = data.get("result", f"{tool_name} completed")
+                    if short_path and result_text == f"{tool_name} completed":
+                        result_text = f"{tool_name} completed: {short_path}"
+                    self.log_manager.record_tool_call(
+                        node.id,
+                        display_name,
+                        success=True,
+                        tool_result=result_text if len(result_text) <= 200 else result_text[:200],
+                        details={
+                            "arguments": tool_input,
+                            "tool_name": display_name,
+                            "streaming": True,
+                        },
+                        stage=CallStage.AFTER,
+                    )
+
+            extra_kwargs["stream_callback"] = _stream_callback
+            extra_kwargs["session_id"] = self.context.global_state.get("session_id", "")
+            extra_kwargs["server_port"] = int(os.environ.get("CHATDEV_SERVER_PORT", "8000"))
+
         def _call_provider() -> ModelResponse:
+            merged = dict(call_options)
+            merged.update(extra_kwargs)
             return provider.call_model(
                 client,
                 conversation=conversation,
                 timeline=timeline,
                 tool_specs=tool_specs or None,
-                **call_options,
+                **merged,
             )
 
         last_input = ''.join(msg.text_content() for msg in conversation) if conversation else ""
@@ -467,8 +543,142 @@ class AgentNodeExecutor(NodeExecutor):
         )
 
         return retrieved_memory
-    
-    
+
+    def _emit_claude_code_file_changes(
+        self,
+        node: Node,
+        response: ModelResponse,
+        response_message: Message,
+    ) -> None:
+        """Emit synthetic TOOL_CALL log entries for Claude Code file operations.
+
+        Claude Code uses its own built-in tools (Write, Edit, Bash) internally.
+        After execution, we inspect ``raw_response["file_changes"]`` (populated
+        by the provider's workspace diff) and emit log entries so the UI shows
+        tool activity and the log system records file operations.
+
+        When streaming was active (``raw_response["_streamed"]`` is truthy),
+        BEFORE/AFTER tool logs were already emitted in real time via the
+        stream callback, so we skip duplicate log emission and only handle
+        file attachment logic.
+
+        Also attaches generated files to the response message so they appear in the UI.
+        """
+        from pathlib import Path
+
+        raw = response.raw_response
+        if not isinstance(raw, dict):
+            return
+
+        file_changes = raw.get("file_changes", [])
+        if not file_changes:
+            return
+
+        workspace_root = self.context.global_state.get("python_workspace_root")
+        if not workspace_root:
+            return
+
+        # If streaming was active, tool logs were already emitted in real time.
+        was_streamed = raw.get("_streamed", False)
+
+        _CHANGE_TO_TOOL = {
+            "created": "Write",
+            "modified": "Edit",
+            "deleted": "Delete",
+        }
+
+        for change in file_changes:
+            path = change.get("path", "")
+            change_type = change.get("change", "unknown")
+            size = change.get("size", 0)
+            tool_name = _CHANGE_TO_TOOL.get(change_type, "FileOp")
+
+            # Only emit post-execution tool logs when streaming was NOT active
+            if not was_streamed:
+                # Emit "before" stage to start the loading indicator in UI
+                self.log_manager.record_tool_call(
+                    node.id,
+                    f"claude:{tool_name}",
+                    success=True,
+                    tool_result=f"Starting {change_type} for: {path}",
+                    details={
+                        "arguments": {"path": path},
+                        "change_type": change_type,
+                        "file_size": size,
+                        "synthetic": True,
+                        "tool_name": f"claude:{tool_name}",
+                    },
+                    stage=CallStage.BEFORE,
+                )
+
+                # Emit "after" stage to complete the loading indicator
+                self.log_manager.record_tool_call(
+                    node.id,
+                    f"claude:{tool_name}",
+                    success=True,
+                    tool_result=f"File {change_type}: {path} ({size} bytes)",
+                    details={
+                        "arguments": {"path": path},
+                        "change_type": change_type,
+                        "file_size": size,
+                        "synthetic": True,
+                        "tool_name": f"claude:{tool_name}",
+                    },
+                    stage=CallStage.AFTER,
+                )
+
+            # Attach created/modified files to response message for UI viewing
+            if change_type in ("created", "modified"):
+                try:
+                    file_path = Path(workspace_root) / path
+                    if file_path.exists() and file_path.is_file():
+                        # Read file content and add as attachment to the message
+                        with open(file_path, 'rb') as f:
+                            content = f.read()
+
+                        # Create attachment block
+                        import mimetypes
+                        mime_type, _ = mimetypes.guess_type(str(file_path))
+                        if mime_type is None:
+                            # Default to text/plain for common code files
+                            if file_path.suffix in ('.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.txt', '.md'):
+                                mime_type = 'text/plain'
+                            else:
+                                mime_type = 'application/octet-stream'
+
+                        # Encode as data URI if it's a text file
+                        if mime_type.startswith('text/') or mime_type in ('application/json', 'application/xml'):
+                            data_uri = f"data:{mime_type};base64,{base64.b64encode(content).decode('utf-8')}"
+                        else:
+                            data_uri = f"data:{mime_type};base64,{base64.b64encode(content).decode('utf-8')}"
+
+                        # Add attachment to message
+                        attachment_ref = AttachmentRef(
+                            name=file_path.name,
+                            attachment_id=f"claude_code_{node.id}_{path.replace('/', '_')}",
+                            mime_type=mime_type,
+                            size=len(content),
+                            data_uri=data_uri,
+                        )
+
+                        # Ensure content is a list before appending
+                        if isinstance(response_message.content, str):
+                            response_message.content = [
+                                MessageBlock.text_block(response_message.content),
+                            ]
+                        response_message.content.append(
+                            MessageBlock(
+                                type="artifact",
+                                text=f"Generated file: {path}",
+                                attachment=attachment_ref,
+                            )
+                        )
+                except Exception as e:
+                    self.log_manager.warning(
+                        f"Failed to attach file {path} to message: {e}",
+                        node_id=node.id
+                    )
+
     def _handle_tool_calls(
         self,
         node: Node,
@@ -846,13 +1056,22 @@ class AgentNodeExecutor(NodeExecutor):
         attachment = block.attachment
         if attachment is None:
             return
+
+        # Ensure kind is always a MessageBlockType enum, not a plain string
+        block_kind = block.type
+        if isinstance(block_kind, str) and not isinstance(block_kind, MessageBlockType):
+            try:
+                block_kind = MessageBlockType(block_kind)
+            except ValueError:
+                block_kind = MessageBlockType.FILE
+
         if attachment.remote_file_id and not attachment.data_uri and not attachment.local_path:
             record = store.register_remote_file(
                 remote_file_id=attachment.remote_file_id,
                 name=attachment.name or attachment.attachment_id or "remote_file",
                 mime_type=attachment.mime_type,
                 size=attachment.size,
-                kind=block.type,
+                kind=block_kind,
                 attachment_id=attachment.attachment_id,
             )
             block.attachment = record.ref
@@ -884,7 +1103,7 @@ class AgentNodeExecutor(NodeExecutor):
 
         record = store.register_file(
             target_path,
-            kind=block.type,
+            kind=block_kind,
             display_name=attachment.name or target_path.name,
             mime_type=attachment.mime_type,
             attachment_id=attachment.attachment_id,

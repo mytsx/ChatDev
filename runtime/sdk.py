@@ -121,6 +121,13 @@ def run_workflow(
     log_id = logger.workflow_id if logger else None
     token_usage = executor.token_tracker.get_token_usage() if executor.token_tracker else None
 
+    # Save sessions to workspace before clearing (for future continuation)
+    from runtime.node.agent.providers.claude_code_provider import ClaudeCodeProvider
+    code_workspace = graph_context.directory / "code_workspace"
+    if code_workspace.exists():
+        ClaudeCodeProvider.save_sessions_to_workspace(str(code_workspace))
+    ClaudeCodeProvider.clear_all_sessions()
+
     meta_info = WorkflowMetaInfo(
         session_name=normalized_session,
         yaml_file=str(yaml_path),

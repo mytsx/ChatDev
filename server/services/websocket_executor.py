@@ -1,11 +1,12 @@
 """GraphExecutor variant that reports results over WebSocket."""
 
 import asyncio
-from typing import List
+from typing import Any, List
 
 from utils.logger import WorkflowLogger
 from workflow.graph import GraphExecutor
 from workflow.graph_context import GraphContext
+from runtime.node.executor.base import ExecutionContext
 
 from server.services.attachment_service import AttachmentService
 from server.services.artifact_dispatcher import ArtifactDispatcher
@@ -61,6 +62,24 @@ class WebSocketGraphExecutor(GraphExecutor):
         from server.services.websocket_logger import WebSocketLogger
 
         return WebSocketLogger(self.websocket_manager, self.session_id, self.graph.name, self.graph.log_level)
+
+    def _get_execution_context(self) -> ExecutionContext:
+        ctx = super()._get_execution_context()
+        ctx.global_state["_subgraph_executor_factory"] = self._create_subgraph_executor
+        return ctx
+
+    def _create_subgraph_executor(self, subgraph: GraphContext, task_payload: Any) -> GraphExecutor:
+        """Create a WebSocketGraphExecutor for a subgraph so its events are broadcast."""
+        executor = WebSocketGraphExecutor(
+            subgraph,
+            session_id=self.session_id,
+            session_controller=self.session_controller,
+            attachment_service=self.attachment_service,
+            websocket_manager=self.websocket_manager,
+            session_store=self.session_store,
+        )
+        executor._execute(task_payload)
+        return executor
 
     async def execute_graph_async(self, task_prompt):
         await asyncio.get_event_loop().run_in_executor(None, self._execute, task_prompt)

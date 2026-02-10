@@ -380,9 +380,29 @@
         </Transition>
       </div>
 
+          <label class="section-label">Workspace Path <span class="optional-tag">(optional)</span></label>
+          <input
+            v-model="workspacePath"
+            type="text"
+            class="workspace-path-input"
+            placeholder="/path/to/your/project"
+            :disabled="loading || isWorkflowRunning"
+          />
+
           <label class="section-label">Status</label>
           <div class="status-display" :class="{ 'status-active': status === 'Running...' }">
             {{ status }}
+          </div>
+
+          <div v-if="tokenUsage" class="cost-summary">
+            <div class="cost-row">
+              <span class="cost-label">Tokens</span>
+              <span class="cost-value">{{ tokenUsage.total_usage?.total_tokens?.toLocaleString() || 0 }}</span>
+            </div>
+            <div v-if="totalCostUsd > 0" class="cost-row">
+              <span class="cost-label">Cost</span>
+              <span class="cost-value cost-highlight">${{ totalCostUsd.toFixed(4) }}</span>
+            </div>
           </div>
 
           <label class="section-label">View</label>
@@ -411,6 +431,14 @@
               @click="handleButtonClick"
               :disabled="loading || (isWorkflowRunning && !taskPrompt.trim()) || (!isWorkflowRunning && status !== 'Completed' && status !== 'Cancelled' && !isConnectionReady)">
               {{ buttonLabel }}
+            </button>
+
+            <button
+              v-if="status === 'Completed'"
+              class="relaunch-button"
+              @click="relaunchWorkflow"
+            >
+              Relaunch
             </button>
 
             <button
@@ -497,6 +525,9 @@ const route = useRoute()
 // Task input state
 const taskPrompt = ref('')
 
+// Workspace path (optional external project directory)
+const workspacePath = ref('')
+
 // File selector state
 const workflowFiles = ref([])
 const selectedFile = ref('')
@@ -509,6 +540,9 @@ const fileSelectorInputRef = ref(null)
 // Status state
 const status = ref('Waiting for workflow selection...')
 const loading = ref(false)
+
+// Token usage & cost tracking
+const tokenUsage = ref(null)
 
 // Session ID for downloads
 let sessionIdToDownload = null
@@ -650,6 +684,10 @@ const viewMode = ref('chat')
 let ws = null
 let sessionId = null
 
+// Continue mode: track completed session for workspace reuse
+const completedSessionId = ref(null)
+const pendingContinueSessionId = ref(null)
+
 const filteredWorkflowFiles = computed(() => {
   // If the file search box is untouched, return all workflows
   if (!isFileSearchDirty.value) {
@@ -664,12 +702,27 @@ const filteredWorkflowFiles = computed(() => {
   )
 })
 
+// Total cost extracted from token usage metadata (call_history)
+const totalCostUsd = computed(() => {
+  if (!tokenUsage.value) return 0
+  const history = tokenUsage.value.call_history || []
+  let total = 0
+  for (const entry of history) {
+    const cost = entry.metadata?.total_cost_usd
+    if (typeof cost === 'number') total += cost
+  }
+  return total
+})
+
 // Button label computed property
 const buttonLabel = computed(() => {
   if (isWorkflowRunning.value) {
     return 'Send'
   }
-  if (status.value === 'Completed' || status.value === 'Cancelled') {
+  if (status.value === 'Completed') {
+    return 'Continue'
+  }
+  if (status.value === 'Cancelled') {
     return 'Relaunch'
   }
   return 'Launch'
@@ -1295,13 +1348,28 @@ const handleButtonClick = () => {
 
     status.value = "Running..."
     shouldGlow.value = false
-  } else if (status.value === 'Completed' || status.value === 'Cancelled') {
-    // If Relaunch, restart the same workflow and re-enter Launch state
+  } else if (status.value === 'Completed') {
+    // Continue: reuse previous workspace and Claude Code sessions
     if (!selectedFile.value) {
       alert('Please choose a workflow file！')
       return
     }
 
+    // Save the completed session ID for workspace reuse
+    pendingContinueSessionId.value = completedSessionId.value
+    resetConnectionState()
+    status.value = 'Connecting...'
+    handleYAMLSelection(selectedFile.value)
+    establishWebSocketConnection()
+  } else if (status.value === 'Cancelled') {
+    // Relaunch: fresh start
+    if (!selectedFile.value) {
+      alert('Please choose a workflow file！')
+      return
+    }
+
+    completedSessionId.value = null
+    pendingContinueSessionId.value = null
     resetConnectionState()
     status.value = 'Connecting...'
     handleYAMLSelection(selectedFile.value)
@@ -1310,6 +1378,20 @@ const handleButtonClick = () => {
     // If Launch, start the workflow
     launchWorkflow()
   }
+}
+
+// Relaunch: fresh start, discard previous session
+const relaunchWorkflow = () => {
+  if (!selectedFile.value) {
+    alert('Please choose a workflow file！')
+    return
+  }
+  completedSessionId.value = null
+  pendingContinueSessionId.value = null
+  resetConnectionState()
+  status.value = 'Connecting...'
+  handleYAMLSelection(selectedFile.value)
+  establishWebSocketConnection()
 }
 
 // Send human input
@@ -1743,7 +1825,9 @@ const launchWorkflow = async () => {
         yaml_file: selectedFile.value,
         task_prompt: trimmedPrompt,
         session_id: sessionId,
-        attachments: attachmentIds
+        attachments: attachmentIds,
+        previous_session_id: pendingContinueSessionId.value || undefined,
+        workspace_path: workspacePath.value.trim() || undefined
       })
     })
 
@@ -1769,6 +1853,8 @@ const launchWorkflow = async () => {
 
       status.value = 'Running...'
       isWorkflowRunning.value = true
+      tokenUsage.value = null
+      pendingContinueSessionId.value = null
     } else {
       const error = await response.json().catch(() => ({}))
       console.error('Failed to launch workflow:', error)
@@ -2115,6 +2201,12 @@ const processMessage = async (msg) => {
     status.value = 'Completed'
     isWorkflowRunning.value = false
     sessionIdToDownload = sessionId
+    completedSessionId.value = sessionId
+
+    // Capture token usage & cost data
+    if (msg.data.token_usage) {
+      tokenUsage.value = msg.data.token_usage
+    }
   }
 
   // Handle direct error messages (e.g., workflow execution errors)
@@ -3008,6 +3100,38 @@ watch(
   cursor: not-allowed;
 }
 
+.workspace-path-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+  box-sizing: border-box;
+}
+.workspace-path-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+.workspace-path-input:hover:not(:disabled),
+.workspace-path-input:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+}
+.workspace-path-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.optional-tag {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 400;
+}
+
 .select-arrow {
   position: absolute;
   right: 10px;
@@ -3099,6 +3223,38 @@ watch(
   background: rgba(160, 196, 255, 0.1);
 }
 
+/* Cost Summary */
+.cost-summary {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.cost-label {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.cost-value {
+  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-highlight {
+  color: #80e0a0;
+  font-weight: 500;
+}
+
 /* View Toggle */
 .view-toggle {
   display: flex;
@@ -3166,6 +3322,24 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.relaunch-button {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  background: #3a3a3a;
+  transition: all 0.3s ease;
+}
+
+.relaunch-button:hover {
+  transform: translateY(-2px);
+  background: #4a4a4a;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
 .cancel-button {

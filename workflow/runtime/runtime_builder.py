@@ -28,8 +28,15 @@ class RuntimeBuilder:
         log_manager = LogManager(logger)
         token_tracker = TokenTracker(workflow_id=self.graph.name)
 
-        code_workspace = (self.graph.directory / "code_workspace").resolve()
-        code_workspace.mkdir(parents=True, exist_ok=True)
+        # Use external workspace_path if provided, otherwise default
+        external_workspace = self.graph.config.metadata.get("workspace_path")
+        if external_workspace:
+            from pathlib import Path as _Path
+            code_workspace = _Path(external_workspace).resolve()
+            code_workspace.mkdir(parents=True, exist_ok=True)
+        else:
+            code_workspace = (self.graph.directory / "code_workspace").resolve()
+            code_workspace.mkdir(parents=True, exist_ok=True)
         attachments_dir = code_workspace / "attachments"
         attachments_dir.mkdir(parents=True, exist_ok=True)
         attachment_store = AttachmentStore(attachments_dir)
