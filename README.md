@@ -120,9 +120,29 @@ See our paper in [Multi-Agent Collaboration via Evolving Orchestration](https://
     cd frontend && npm install
     ```
 
+### 🔑 Configuration
+
+*   **Environment Variables**:
+    ```bash
+    cp .env.example .env
+    ```
+*   **Model Keys**: Set `API_KEY` and `BASE_URL` in `.env` for your LLM provider.
+*   **YAML placeholders**: Use `${VAR}`（e.g., `${API_KEY}`）in configuration files to reference these variables.
+
 ### ⚡️ Run the Application
 
-1.  **Start Backend** :
+#### Using Makefile (Recommended)
+
+**Start both Backend and Frontent**:
+```bash
+make dev
+```
+
+> Then access the Web Console at **[http://localhost:5173](http://localhost:5173)**.
+
+#### Manual Commands
+
+1.  **Start Backend**:
     ```bash
     # Run from the project root
     uv run python server_main.py --port 6400 --reload
@@ -143,12 +163,43 @@ See our paper in [Multi-Agent Collaboration via Evolving Orchestration](https://
     > * **Backend**: start with `--port 6401`
     > * **Frontend**: set `VITE_API_BASE_URL=http://localhost:6401`
 
+#### Utility Commands
 
-### 🔑 Configuration
+*   **Help command**:
+    ```bash
+    make help
+    ```
 
-*   **Environment Variables**: Create a `.env` file in the project root.
-*   **Model Keys**: Set `API_KEY` and `BASE_URL` in `.env` for your LLM provider.
-*   **YAML placeholders**: Use `${VAR}`（e.g., `${API_KEY}`）in configuration files to reference these variables.
+*   **Sync YAML workflows to frontend**:
+    ```bash
+    make sync
+    ```
+    Uploads all workflow files from `yaml_instance/` to the database.
+
+*   **Validate all YAML workflows**:
+    ```bash
+    make validate-yamls
+    ```
+    Checks all YAML files for syntax and schema errors.
+
+### 🐳 Run with Docker
+Alternatively, you can run the entire application using Docker Compose. This method simplifies dependency management and provides a consistent environment.
+
+1.  **Prerequisites**:
+    *   [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
+    *   Ensure you have a `.env` file in the project root for your API keys.
+
+2.  **Build and Run**:
+    ```bash
+    # From the project root
+    docker compose up --build
+    ```
+
+3.  **Access**:
+    *   **Backend**: `http://localhost:6400`
+    *   **Frontend**: `http://localhost:5173`
+
+> The services will automatically restart if they crash, and local file changes will be reflected inside the containers for live development.
 
 ---
 
@@ -255,6 +306,8 @@ By contributing to DevAll, you'll be recognized in our **Contributors** list bel
     <td align="center"><a href="https://github.com/shiowen"><img src="https://github.com/shiowen.png?size=100" width="64px;" alt=""/><br /><sub><b>shiowen</b></sub></a></td>
     <td align="center"><a href="https://github.com/kilo2127"><img src="https://github.com/kilo2127.png?size=100" width="64px;" alt=""/><br /><sub><b>kilo2127</b></sub></a></td>
     <td align="center"><a href="https://github.com/AckerlyLau"><img src="https://github.com/AckerlyLau.png?size=100" width="64px;" alt=""/><br /><sub><b>AckerlyLau</b></sub></a></td>
+    <td align="center"><a href="https://github.com/LaansDole"><img src="https://github.com/LaansDole.png?size=100" width="64px;" alt=""/><br /><sub><b>LaansDole</b></sub></a></td>
+    <td align="center"><a href="https://github.com/zivkovicp"><img src="https://github.com/zivkovicp.png?size=100" width="64px;" alt=""/><br /><sub><b>zivkovicp</b></sub></a></td>
 </table>
 
 ## 🤝 Acknowledgments

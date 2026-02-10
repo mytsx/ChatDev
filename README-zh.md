@@ -118,7 +118,18 @@ ChatDev 已从一个专门的软件开发多智能体系统演变为一个全面
     cd frontend && npm install
     ```
 
-### ⚡️ 运行应用
+### ⚡️ 运行应用（本地）
+
+#### 使用 Makefile（推荐）
+
+**同时启动后端与前端**：
+```bash
+make dev
+```
+
+> 然后访问 Web 控制台：**[http://localhost:5173](http://localhost:5173)**。
+
+#### 手动命令
 
 1.  **启动后端**：
     ```bash
@@ -140,6 +151,44 @@ ChatDev 已从一个专门的软件开发多智能体系统演变为一个全面
     > * **后端**：启动时指定 `--port 6401`
     > * **前端**：设置 `VITE_API_BASE_URL=http://localhost:6401`
 
+#### 常用命令
+
+*   **帮助命令**：
+    ```bash
+    make help
+    ```
+
+*   **同步 YAML 工作流到前端**：
+    ```bash
+    make sync
+    ```
+    将 `yaml_instance/` 中的所有工作流文件上传到数据库。
+
+*   **校验所有 YAML 工作流**：
+    ```bash
+    make validate-yamls
+    ```
+    检查所有 YAML 文件的语法与 schema 错误。
+
+
+### 🐳 使用 Docker 运行
+你也可以通过 Docker Compose 运行整个应用。该方式可简化依赖管理，并提供一致的运行环境。
+
+1.  **前置条件**：
+    *   已安装 [Docker](https://docs.docker.com/get-docker/) 和 [Docker Compose](https://docs.docker.com/compose/install/)。
+    *   请确保在项目根目录中存在用于配置 API Key 的 `.env` 文件。
+
+2.  **构建并运行**：
+    ```bash
+    # 在项目根目录执行
+    docker compose up --build
+    ```
+
+3.  **访问地址**：
+    *   **后端**：`http://localhost:6400`
+    *   **前端**：`http://localhost:5173`
+
+> 服务在异常退出后会自动重启，本地文件的修改会同步映射到容器中，便于实时开发。
 
 ### 🔑 配置
 
@@ -252,6 +301,8 @@ if result.final_message:
     <td align="center"><a href="https://github.com/shiowen"><img src="https://github.com/shiowen.png?size=100" width="64px;" alt=""/><br /><sub><b>shiowen</b></sub></a></td>
     <td align="center"><a href="https://github.com/kilo2127"><img src="https://github.com/kilo2127.png?size=100" width="64px;" alt=""/><br /><sub><b>kilo2127</b></sub></a></td>
     <td align="center"><a href="https://github.com/AckerlyLau"><img src="https://github.com/AckerlyLau.png?size=100" width="64px;" alt=""/><br /><sub><b>AckerlyLau</b></sub></a></td>
+    <td align="center"><a href="https://github.com/LaansDole"><img src="https://github.com/LaansDole.png?size=100" width="64px;" alt=""/><br /><sub><b>LaansDole</b></sub></a></td>
+    <td align="center"><a href="https://github.com/zivkovicp"><img src="https://github.com/zivkovicp.png?size=100" width="64px;" alt=""/><br /><sub><b>zivkovicp</b></sub></a></td>
 </table>
 
 ## 🤝 致谢
