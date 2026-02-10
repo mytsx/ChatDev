@@ -30,10 +30,9 @@ graph:
       description: "Phase 01 — Analyzes user requirements and produces a structured specification."
       context_window: 0
       config:
-        provider: openai
-        name: gpt-4o
-        base_url: ${BASE_URL}
-        api_key: ${API_KEY}
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
         role: |
           You are a Requirements Analyst and Software Architect.
           Analyze the user's project request and produce a clear, structured specification.
@@ -58,9 +57,14 @@ graph:
           - [How we know the project is complete]
 
           Be specific and actionable. Avoid vague requirements.
-        params:
-          temperature: 0.2
-          max_tokens: 2000
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
 
     # ── Phase 02: Task Planning ─────────────────────────────────────
     - id: Task Planner
@@ -68,10 +72,9 @@ graph:
       description: "Phase 02 — Breaks requirements into an ordered list of implementation tasks."
       context_window: 0
       config:
-        provider: openai
-        name: gpt-4o
-        base_url: ${BASE_URL}
-        api_key: ${API_KEY}
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
         role: |
           You are a Technical Project Planner.
           Based on the requirements specification, create a detailed, ordered task plan.
@@ -100,9 +103,14 @@ graph:
           - Order tasks by dependency (foundational first)
           - Keep tasks focused — one concern per task
           - Include setup tasks (environment, dependencies) first
-        params:
-          temperature: 0.2
-          max_tokens: 3000
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
 
     # ── Phase 03: Plan Approval (Human) ─────────────────────────────
     - id: Plan Approval
@@ -262,10 +270,9 @@ graph:
       description: "Phase 10b — Produces a final delivery summary."
       context_window: 0
       config:
-        provider: openai
-        name: gpt-4o
-        base_url: ${BASE_URL}
-        api_key: ${API_KEY}
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
         role: |
           You are the Project Delivery Manager. Produce a final delivery summary.
 
@@ -293,9 +300,14 @@ graph:
           - [Suggested improvements or future work]
 
           Be concise and factual. Focus on what was delivered.
-        params:
-          temperature: 0.1
-          max_tokens: 2000
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
 
   edges:
     # ═══ Phase 01 → Phase 02: Requirements → Planning ═══

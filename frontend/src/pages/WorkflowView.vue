@@ -49,9 +49,13 @@
           <WorkflowNode
             :id="props.id"
             :data="props.data"
+            :sprite="nodeSpriteMap.get(props.id) || ''"
             @hover="onNodeHover"
             @leave="onNodeLeave"
           />
+        </template>
+        <template #node-group="props">
+          <div class="subgraph-group-label">{{ props.data?.label || props.id }}</div>
         </template>
         <template #node-start-node="props">
           <StartNode :id="props.id" :data="props.data" />
@@ -271,7 +275,8 @@ import WorkflowEdge from '../components/WorkflowEdge.vue'
 import StartNode from '../components/StartNode.vue'
 import FormGenerator from '../components/FormGenerator.vue'
 import yaml from 'js-yaml'
-import { fetchYaml, fetchVueGraph, postVuegraphs, updateYaml, postYamlNameChange, postYamlCopy } from '../utils/apiFunctions'
+import { fetchYaml, fetchVueGraph, postVuegraphs, updateYaml, postYamlNameChange, postYamlCopy, fetchFlattenedWorkflow } from '../utils/apiFunctions'
+import { spriteFetcher } from '../utils/spriteFetcher.js'
 
 const props = defineProps({
   workflowName: {
@@ -299,6 +304,8 @@ const activeTab = ref('graph')
 const yamlContent = ref({}) // YAML object
 const yamlTextString = ref('') // YAML string
 const yamlParseError = ref(null)
+const nodeSpriteMap = ref(new Map())
+const flattenedData = ref(null) // Flattened subgraph data
 
 const showDynamicFormGenerator = ref(false)
 const showMenu = ref(false)
@@ -432,6 +439,12 @@ const onNodeContextMenu = (params) => {
     return
   }
 
+  // Disable context menu for inline subgraph nodes and group nodes
+  const nodeData = nodes.value.find(n => n.id === node.id)
+  if (nodeData?.data?.isInlineSubgraphNode || nodeData?.data?.isSubgraphGroup || nodeData?.type === 'group') {
+    return
+  }
+
   const rect = vueflowContainerRef.value.getBoundingClientRect()
   contextMenuX.value = mouseEvent.clientX - rect.left
   contextMenuY.value = mouseEvent.clientY - rect.top
@@ -454,6 +467,11 @@ const onEdgeContextMenu = (params) => {
   const fromId = edge.data?.from || edge.source
   const toId = edge.data?.to || edge.target
   if (!fromId || !toId) {
+    return
+  }
+
+  // Disable context menu for inline subgraph edges
+  if (edge.data?.isInlineSubgraphEdge) {
     return
   }
 
@@ -651,6 +669,23 @@ const onDeleteEdgeFromContext = async () => {
   await deleteEdgeByEndpoints(info.from, info.to)
 }
 
+const loadFlattenedData = async () => {
+  try {
+    if (!workflowName.value) return
+    const result = await fetchFlattenedWorkflow(workflowName.value)
+    if (result?.success) {
+      flattenedData.value = { subgraphs: result.subgraphs || {} }
+      // Re-prefetch sprites to include subgraph nodes
+      prefetchNodeSprites()
+    } else {
+      flattenedData.value = null
+    }
+  } catch (error) {
+    console.warn('Failed to load flattened workflow data:', error)
+    flattenedData.value = null
+  }
+}
+
 const initializeWorkflow = async (name) => {
   if (!name) {
     return
@@ -658,6 +693,7 @@ const initializeWorkflow = async (name) => {
   workflowName.value = name
   console.log('Workflow initialized: ', workflowName.value)
   await loadYamlFile()
+  await loadFlattenedData()
   loadAndSyncVueFlowGraph()
   await nextTick()
   fitView?.({ padding: 0.1 })
@@ -770,6 +806,7 @@ const loadYamlFile = async () => {
       yamlContent.value = parsed || {}
       yamlTextString.value = yamlString
       yamlParseError.value = null
+      prefetchNodeSprites()
     } catch (parseError) {
       console.error('Error parsing YAML:', parseError)
       yamlParseError.value = parseError.message
@@ -777,6 +814,27 @@ const loadYamlFile = async () => {
     }
   } catch (error) {
     console.error('Error loading YAML file: ', error)
+  }
+}
+
+const prefetchNodeSprites = () => {
+  const yamlNodes = yamlContent.value?.graph?.nodes || []
+  nodeSpriteMap.value.clear()
+  for (const node of yamlNodes) {
+    if (node.id) {
+      nodeSpriteMap.value.set(node.id, spriteFetcher.fetchSprite(node.id, 'D', 1))
+    }
+  }
+  // Also assign sprites for inline subgraph nodes
+  if (flattenedData.value?.subgraphs) {
+    for (const [, sg] of Object.entries(flattenedData.value.subgraphs)) {
+      for (const node of (sg.nodes || [])) {
+        const inlineId = `${sg.parent_node_id}::${node.id}`
+        if (!nodeSpriteMap.value.has(inlineId)) {
+          nodeSpriteMap.value.set(inlineId, spriteFetcher.fetchSprite(inlineId, 'D', 1))
+        }
+      }
+    }
   }
 }
 
@@ -1119,8 +1177,197 @@ const updateNodesAndEdgesFromYaml = (preserveExistingLayout = false) => {
       // if present, ensure the start node data/type is correct
       nodes.value = nodes.value.map(n => n.id === START_NODE_ID ? startNode : n)
     }
+
+    // Inline subgraph nodes if flattened data is available
+    inlineSubgraphNodes(preserveExistingLayout ? existingNodeById : null, preserveExistingLayout ? existingEdgeByKey : null)
   } catch (error) {
     console.error('Error syncing nodes and edges from YAML:', error)
+  }
+}
+
+const inlineSubgraphNodes = (existingNodeById, existingEdgeByKey) => {
+  const subgraphs = flattenedData.value?.subgraphs
+  if (!subgraphs || Object.keys(subgraphs).length === 0) return
+
+  for (const [parentNodeId, sg] of Object.entries(subgraphs)) {
+    const parentNodeIndex = nodes.value.findIndex(n => n.id === parentNodeId)
+    if (parentNodeIndex === -1) continue
+
+    const parentNode = nodes.value[parentNodeIndex]
+    const parentPos = parentNode.position || { x: 0, y: 0 }
+
+    // Create a group node to replace the subgraph node
+    const groupId = parentNodeId
+    const groupPadding = 40
+    const innerSpacingX = 250
+    const innerSpacingY = 110
+
+    // Compute simple layout for inner nodes
+    const sgNodes = sg.nodes || []
+    const sgEdges = sg.edges || []
+    const sgStart = new Set(Array.isArray(sg.start) ? sg.start : [])
+    const sgEnd = new Set(Array.isArray(sg.end) ? sg.end : [])
+
+    // Simple topological layout for inner nodes
+    const innerNodeIds = sgNodes.map(n => n?.id).filter(Boolean)
+    const innerAdj = new Map()
+    const innerIndegree = new Map()
+    innerNodeIds.forEach(id => {
+      innerAdj.set(id, new Set())
+      innerIndegree.set(id, 0)
+    })
+    sgEdges.forEach(e => {
+      if (!e?.from || !e?.to || !innerAdj.has(e.from) || !innerAdj.has(e.to)) return
+      innerAdj.get(e.from).add(e.to)
+      innerIndegree.set(e.to, (innerIndegree.get(e.to) || 0) + 1)
+    })
+
+    const innerLevels = new Map()
+    const queue = []
+    innerNodeIds.forEach(id => {
+      if ((innerIndegree.get(id) || 0) === 0) {
+        queue.push(id)
+        innerLevels.set(id, 0)
+      }
+    })
+    while (queue.length) {
+      const id = queue.shift()
+      const lvl = innerLevels.get(id) || 0
+      for (const nb of (innerAdj.get(id) || new Set())) {
+        const newLvl = Math.max(innerLevels.get(nb) || 0, lvl + 1)
+        innerLevels.set(nb, newLvl)
+        innerIndegree.set(nb, innerIndegree.get(nb) - 1)
+        if (innerIndegree.get(nb) === 0) queue.push(nb)
+      }
+    }
+    // Assign fallback level to unvisited nodes
+    innerNodeIds.forEach(id => {
+      if (!innerLevels.has(id)) innerLevels.set(id, 0)
+    })
+
+    const innerBuckets = new Map()
+    for (const [id, lvl] of innerLevels.entries()) {
+      if (!innerBuckets.has(lvl)) innerBuckets.set(lvl, [])
+      innerBuckets.get(lvl).push(id)
+    }
+
+    const innerPositions = new Map()
+    const lvlKeys = Array.from(innerBuckets.keys()).sort((a, b) => a - b)
+    lvlKeys.forEach(lvl => {
+      const ids = innerBuckets.get(lvl) || []
+      ids.forEach((id, idx) => {
+        innerPositions.set(id, {
+          x: groupPadding + lvl * innerSpacingX,
+          y: groupPadding + 30 + idx * innerSpacingY
+        })
+      })
+    })
+
+    // Calculate group dimensions
+    const maxLvl = lvlKeys.length > 0 ? Math.max(...lvlKeys) : 0
+    const maxBucketSize = lvlKeys.reduce((max, lvl) => Math.max(max, (innerBuckets.get(lvl) || []).length), 0)
+    const groupWidth = Math.max(300, groupPadding * 2 + (maxLvl + 1) * innerSpacingX)
+    const groupHeight = Math.max(200, groupPadding * 2 + 30 + maxBucketSize * innerSpacingY)
+
+    // Build group node
+    const groupNode = {
+      id: groupId,
+      type: 'group',
+      position: existingNodeById?.has(groupId) ? existingNodeById.get(groupId).position : parentPos,
+      data: { label: parentNodeId, isSubgraphGroup: true },
+      style: {
+        width: `${groupWidth}px`,
+        height: `${groupHeight}px`,
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        border: '2px dashed rgba(255, 255, 255, 0.15)',
+        borderRadius: '16px',
+        padding: '0'
+      }
+    }
+
+    // Build inner nodes with prefixed IDs
+    const innerVueNodes = sgNodes.map(sgNode => {
+      const inlineId = `${parentNodeId}::${sgNode.id}`
+      const pos = innerPositions.get(sgNode.id) || { x: groupPadding, y: groupPadding + 30 }
+
+      if (existingNodeById?.has(inlineId)) {
+        const existing = existingNodeById.get(inlineId)
+        return {
+          ...existing,
+          id: inlineId,
+          parentNode: groupId,
+          extent: 'parent',
+          data: { ...sgNode, isInlineSubgraphNode: true, parentSubgraph: parentNodeId }
+        }
+      }
+
+      return {
+        id: inlineId,
+        type: 'workflow-node',
+        label: sgNode.id,
+        position: pos,
+        parentNode: groupId,
+        extent: 'parent',
+        data: { ...sgNode, isInlineSubgraphNode: true, parentSubgraph: parentNodeId }
+      }
+    }).filter(Boolean)
+
+    // Build inner edges with prefixed IDs
+    const innerVueEdges = sgEdges.map(sgEdge => {
+      const sourceId = `${parentNodeId}::${sgEdge.from}`
+      const targetId = `${parentNodeId}::${sgEdge.to}`
+      const key = `${sourceId}-${targetId}`
+
+      return {
+        id: key,
+        source: sourceId,
+        target: targetId,
+        type: 'workflow-edge',
+        data: { ...sgEdge, isInlineSubgraphEdge: true },
+        markerEnd: {
+          type: MarkerType.Arrow,
+          width: 16,
+          height: 16,
+          color: (sgEdge && sgEdge.trigger === false) ? '#868686' : '#f2f2f2',
+          strokeWidth: 1.5,
+        },
+      }
+    })
+
+    // Replace parent subgraph node with group + inner nodes
+    nodes.value = nodes.value.filter(n => n.id !== parentNodeId)
+    nodes.value.push(groupNode, ...innerVueNodes)
+
+    // Remap edges that pointed to/from the subgraph node
+    const sgStartNodes = Array.from(sgStart).map(s => `${parentNodeId}::${s}`)
+    const sgEndNodes = Array.from(sgEnd).map(e => `${parentNodeId}::${e}`)
+
+    edges.value = edges.value.flatMap(edge => {
+      if (edge.target === parentNodeId && edge.source !== parentNodeId) {
+        // Edge going INTO subgraph → connect to start nodes
+        return sgStartNodes.map(startTarget => ({
+          ...edge,
+          id: `${edge.source}-${startTarget}`,
+          target: startTarget,
+        }))
+      }
+      if (edge.source === parentNodeId && edge.target !== parentNodeId) {
+        // Edge coming OUT of subgraph → connect from end nodes
+        return sgEndNodes.map(endSource => ({
+          ...edge,
+          id: `${endSource}-${edge.target}`,
+          source: endSource,
+        }))
+      }
+      // Remove self-referencing edges (subgraph → subgraph)
+      if (edge.source === parentNodeId && edge.target === parentNodeId) {
+        return []
+      }
+      return [edge]
+    })
+
+    // Add inner edges
+    edges.value.push(...innerVueEdges)
   }
 }
 
@@ -1509,6 +1756,12 @@ const onNodeClick = (event) => {
     return
   }
 
+  // Ignore click for inline subgraph nodes and group nodes
+  const nodeData = nodes.value.find(n => n.id === clickedNode.id)
+  if (nodeData?.data?.isInlineSubgraphNode || nodeData?.data?.isSubgraphGroup || nodeData?.type === 'group') {
+    return
+  }
+
   openNodeEditor(clickedNode.id)
 }
 
@@ -1526,6 +1779,11 @@ const onEdgeClick = (event) => {
     return
   }
   if (!fromId || !toId) {
+    return
+  }
+
+  // Ignore inline subgraph edges
+  if (clickedEdge.data?.isInlineSubgraphEdge) {
     return
   }
 
@@ -2322,5 +2580,18 @@ const handleCopySubmit = async () => {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+.subgraph-group-label {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  z-index: 1;
 }
 </style>

@@ -231,6 +231,36 @@ export async function fetchWorkflowsWithDesc() {
   }
 }
 
+// Fetch flattened workflow (main + subgraphs)
+export async function fetchFlattenedWorkflow(filename) {
+  try {
+    const yamlFilename = addYamlSuffix(filename)
+    const response = await fetch(apiUrl(`/api/workflows/${encodeURIComponent(yamlFilename)}/flattened`))
+    const data = await response.json().catch(() => ({}))
+
+    if (response.ok) {
+      return {
+        success: true,
+        main: data?.main,
+        subgraphs: data?.subgraphs || {}
+      }
+    }
+
+    return {
+      success: false,
+      detail: data?.detail,
+      message: data?.message || 'Failed to fetch flattened workflow',
+      status: response.status
+    }
+  } catch (error) {
+    console.error('Error fetching flattened workflow:', error)
+    return {
+      success: false,
+      message: 'API error'
+    }
+  }
+}
+
 // Fetch YAML file content
 export async function fetchWorkflowYAML(filename) {
   try {

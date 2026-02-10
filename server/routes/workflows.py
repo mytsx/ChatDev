@@ -1,3 +1,4 @@
+import yaml as pyyaml
 from fastapi import APIRouter, HTTPException
 
 from server.models import (
@@ -178,6 +179,59 @@ async def copy_workflow_file(filename: str, request: WorkflowCopyRequest):
         logger = get_server_logger()
         logger.log_exception(exc, f"Unexpected error copying workflow: {filename}")
         raise WorkflowExecutionError(f"Failed to copy workflow: {exc}")
+
+
+@router.get("/api/workflows/{filename}/flattened")
+async def get_flattened_workflow(filename: str):
+    try:
+        safe_filename = validate_workflow_filename(filename, require_yaml_extension=True)
+        file_path = YAML_DIR / safe_filename
+        if not file_path.exists() or not file_path.is_file():
+            raise ResourceNotFoundError(
+                "Workflow file not found",
+                resource_type="workflow",
+                resource_id=safe_filename,
+            )
+
+        with open(file_path, "r", encoding="utf-8") as handle:
+            main_content = pyyaml.safe_load(handle.read())
+
+        subgraphs = {}
+        for node in (main_content.get("graph", {}).get("nodes", [])):
+            if node.get("type") != "subgraph":
+                continue
+            node_id = node.get("id", "")
+            sg_path_raw = (node.get("config", {}).get("config", {}).get("path", ""))
+            if not sg_path_raw:
+                continue
+
+            sg_file = YAML_DIR / sg_path_raw
+            if not sg_file.exists() or not sg_file.is_file():
+                continue
+
+            with open(sg_file, "r", encoding="utf-8") as sg_handle:
+                sg_content = pyyaml.safe_load(sg_handle.read())
+
+            sg_graph = sg_content.get("graph", {})
+            subgraphs[node_id] = {
+                "parent_node_id": node_id,
+                "nodes": sg_graph.get("nodes", []),
+                "edges": sg_graph.get("edges", []),
+                "start": sg_graph.get("start", []),
+                "end": sg_graph.get("end", []),
+            }
+
+        return {"main": main_content, "subgraphs": subgraphs}
+    except ValidationError:
+        raise
+    except SecurityError:
+        raise
+    except ResourceNotFoundError:
+        raise
+    except Exception as exc:
+        logger = get_server_logger()
+        logger.log_exception(exc, f"Unexpected error flattening workflow: {filename}")
+        raise WorkflowExecutionError(f"Failed to flatten workflow: {exc}")
 
 
 @router.get("/api/workflows/{filename}")
