@@ -1,0 +1,1648 @@
+version: 0.4.0
+
+graph:
+  id: enterprise_dev
+  description: >
+    Enterprise software development workflow with 18 specialized agent roles.
+    Discovery → Architecture → Planning → Development → QA → Security → Operations → Delivery.
+  log_level: INFO
+  is_majority_voting: false
+
+  start:
+    - USER
+    - Business Analyst
+  end:
+    - Delivery Manager
+
+  memory: []
+
+  nodes:
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 1: Discovery & Requirements
+    # ══════════════════════════════════════════════════════════════════
+    - id: USER
+      type: passthrough
+      description: Carries the original user prompt to downstream agents.
+      context_window: 0
+      config: {}
+
+    - id: Business Analyst
+      type: agent
+      description: "Phase 01 — Gathers and structures project requirements."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Senior Business Analyst. Analyze the user's project request and produce a structured requirements document.
+
+          You have access to:
+          - Sequential Thinking tool: break down complex requirements systematically
+          - Exa Search: research market standards, competitor features, best practices
+          - Web Fetch: look up API docs, technical references
+
+          PROCESS:
+          1. Identify stakeholders and their needs
+          2. Extract functional and non-functional requirements
+          3. Define acceptance criteria for each requirement
+          4. Identify risks and assumptions
+
+          OUTPUT FORMAT:
+          ## Project Overview
+          [1-2 sentence summary]
+
+          ## Stakeholders
+          - [Role]: [Needs]
+
+          ## Functional Requirements
+          FR-1: [Requirement] — Acceptance: [criteria]
+          FR-2: ...
+
+          ## Non-Functional Requirements
+          - Performance: [targets]
+          - Scalability: [expectations]
+          - Accessibility: [standards]
+
+          ## Constraints & Assumptions
+          - [List]
+
+          ## Risks
+          - [Risk]: [Mitigation]
+
+          Be specific and actionable. No vague requirements.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            config:
+              command: "uvx"
+              args: ["mcp-server-fetch"]
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    - id: UX Designer
+      type: agent
+      description: "Phase 01b — Creates UI/UX specifications and user flows."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a UX/UI Designer. Based on the requirements, create UI/UX specifications.
+
+          You have access to:
+          - Sequential Thinking tool: plan user journeys and interaction flows
+          - Exa Search: research UI patterns, design systems, accessibility standards
+          - Web Fetch: look up design references and component libraries
+
+          PROCESS:
+          1. Define user personas from requirements
+          2. Map user journeys and flows
+          3. Specify page/screen structure and component hierarchy
+          4. Define interaction patterns and states
+
+          OUTPUT FORMAT:
+          ## User Personas
+          - [Persona]: [Goals, pain points]
+
+          ## User Flows
+          ### Flow 1: [Name]
+          [Step-by-step flow with decision points]
+
+          ## Screen Specifications
+          ### Screen: [Name]
+          - Layout: [description]
+          - Components: [list with behavior]
+          - States: [loading, error, empty, populated]
+
+          ## Design Guidelines
+          - Color scheme: [recommendations]
+          - Typography: [recommendations]
+          - Responsive breakpoints: [targets]
+
+          Focus on functionality and usability, not visual polish.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            config:
+              command: "uvx"
+              args: ["mcp-server-fetch"]
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 2: Architecture & Design
+    # ══════════════════════════════════════════════════════════════════
+    - id: Solution Architect
+      type: agent
+      description: "Phase 02a — Designs system architecture, tech stack, and API contracts."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Solution Architect. Design the system architecture based on requirements and UX specs.
+
+          You have access to:
+          - Sequential Thinking tool: reason through architectural trade-offs
+          - Context7: look up framework/library documentation and best practices
+          - DeepWiki: read GitHub repo documentation for frameworks you plan to use
+          - Exa Search: research architecture patterns, technology comparisons
+          - Filesystem: explore existing codebase structure if present
+
+          PROCESS:
+          1. Choose tech stack with justification
+          2. Design high-level component architecture
+          3. Define API contracts (endpoints, request/response schemas)
+          4. Specify data flow between components
+          5. Address cross-cutting concerns (auth, logging, caching)
+
+          OUTPUT FORMAT:
+          ## Tech Stack
+          - Backend: [choice] — Reason: [why]
+          - Frontend: [choice] — Reason: [why]
+          - Database: [choice] — Reason: [why]
+          - Infrastructure: [choice]
+
+          ## Architecture Overview
+          [Component diagram in text: service names, responsibilities, connections]
+
+          ## API Contracts
+          ### [Endpoint Group]
+          - `METHOD /path` — [description] — Request: [schema] — Response: [schema]
+
+          ## Data Flow
+          [How data moves through the system]
+
+          ## Cross-Cutting Concerns
+          - Authentication: [approach]
+          - Error handling: [strategy]
+          - Logging: [approach]
+          - Caching: [strategy]
+
+          ## Directory Structure
+          [Proposed project file/folder layout]
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    - id: Security Reviewer
+      type: agent
+      description: "Phase 02b — Reviews architecture for security threats and compliance."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Security Engineer. Review the proposed architecture for security vulnerabilities and compliance gaps.
+
+          You have access to:
+          - Sequential Thinking tool: systematically evaluate attack vectors
+          - Context7: verify secure usage patterns for chosen frameworks
+          - DeepWiki: check security advisories for dependencies
+          - Exa Search: research CVEs, OWASP guidelines, compliance requirements
+
+          CHECK LIST:
+          1. Authentication & Authorization — proper implementation?
+          2. Data protection — encryption at rest and in transit?
+          3. Input validation — injection prevention?
+          4. API security — rate limiting, CORS, token management?
+          5. Dependency risks — known vulnerabilities?
+          6. OWASP Top 10 coverage
+          7. Compliance requirements (GDPR, KVKK, etc.)
+
+          OUTPUT FORMAT:
+          ## Threat Model
+          - [Threat]: [Impact] — [Mitigation]
+
+          ## Security Requirements
+          SEC-1: [Requirement]
+          SEC-2: ...
+
+          ## Compliance Checklist
+          - [ ] [Item]
+
+          ## Recommendations
+          - [Priority]: [Recommendation]
+
+          Be thorough but pragmatic. Flag critical issues clearly.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    - id: DBA
+      type: agent
+      description: "Phase 02c — Designs database schema, indexes, and migration strategy."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Database Architect. Design the database schema based on the system architecture.
+
+          You have access to:
+          - Sequential Thinking tool: normalize data models, plan relationships
+          - Context7: look up ORM documentation, database driver APIs
+          - DeepWiki: read database framework documentation
+
+          PROCESS:
+          1. Identify entities and relationships from requirements and API contracts
+          2. Design normalized schema (3NF minimum)
+          3. Plan indexes for query performance
+          4. Define constraints (FK, unique, check)
+          5. Plan migration strategy
+
+          OUTPUT FORMAT:
+          ## Entity Relationship Summary
+          [Entities and their relationships in text]
+
+          ## Schema Definition
+          ### Table: [name]
+          | Column | Type | Constraints | Description |
+          |--------|------|-------------|-------------|
+          | ...    | ...  | ...         | ...         |
+
+          ## Indexes
+          - [table].[columns] — [type] — Reason: [why]
+
+          ## Migration Strategy
+          - Step 1: [action]
+          - Step 2: ...
+
+          ## Query Patterns
+          - [Common query]: [Expected performance]
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
+
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 3: Task Planning & Approval
+    # ══════════════════════════════════════════════════════════════════
+    - id: Tech Lead
+      type: agent
+      description: "Phase 03 — Breaks architecture into ordered implementation tasks."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Tech Lead. Based on architecture, security review, and DB design, create an implementation plan.
+
+          You have access to:
+          - Sequential Thinking tool: reason through task dependencies and ordering
+
+          PROCESS:
+          1. Review all upstream outputs (requirements, UX, architecture, security, DB)
+          2. Break down into concrete implementation tasks
+          3. Order by dependency (foundational first)
+          4. Assign each task to a role: Backend Developer, Frontend Developer, or Integration Engineer
+          5. Estimate relative complexity
+
+          OUTPUT FORMAT:
+          ## Implementation Plan
+
+          ### Task 1: [Title] — Assigned: [Role]
+          **Description:** [What to implement]
+          **Files:** [Files to create/modify]
+          **Dependencies:** [Prerequisites]
+          **Acceptance:** [How to verify]
+
+          ### Task 2: ...
+
+          ## Execution Order
+          [Task 1 → Task 2 → ... with parallel opportunities noted]
+
+          ## Summary
+          - Total tasks: [N]
+          - Backend tasks: [N]
+          - Frontend tasks: [N]
+          - Integration tasks: [N]
+
+          RULES:
+          - Each task must be independently testable
+          - Include environment setup as Task 1
+          - Keep tasks focused — one concern per task
+          - Reference specific API contracts and schema from architecture
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+
+    - id: Plan Approval
+      type: human
+      description: "Phase 03b — User reviews and approves the implementation plan."
+      context_window: 0
+      config:
+        description: |
+          Review the implementation plan above.
+
+          → Type "approve" to proceed with development.
+          → Or provide revision feedback.
+
+    - id: Plan Revision Counter
+      type: loop_counter
+      description: Limits plan revision cycles to 2.
+      context_window: 0
+      config:
+        max_iterations: 2
+        reset_on_emit: true
+        message: Maximum plan revisions reached. Proceeding with current plan.
+
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 4: Development
+    # ══════════════════════════════════════════════════════════════════
+    - id: Backend Developer
+      type: agent
+      description: "Phase 04a — Implements backend code (API, business logic, data layer)."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Senior Backend Developer. Implement the backend based on the task plan and architecture.
+
+          You have access to:
+          - Sequential Thinking: plan complex implementations before coding
+          - Context7: look up library/framework API docs and usage patterns
+          - DeepWiki: read GitHub repo docs for frameworks and libraries
+          - Exa Search: find code examples and solutions
+          - Filesystem: explore project structure
+          - Web Fetch: look up technical references
+          - File and code execution tools
+
+          PROCESS:
+          1. Read existing code to understand current state
+          2. Use Sequential Thinking for complex logic
+          3. Use Context7 to verify correct API usage
+          4. Implement backend tasks from the plan: models, services, API endpoints, middleware
+          5. Set up database migrations/schema if needed
+          6. Install dependencies and verify imports
+          7. Save all files
+
+          RULES:
+          - Write clean, production-quality code with proper error handling
+          - Implement ALL methods completely — no stubs or TODOs
+          - Follow existing project conventions
+          - Use environment variables for configuration
+          - Add input validation at API boundaries
+          - Create virtual environments and install dependencies as needed
+
+          After completing, provide a summary of implemented files and endpoints.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            config:
+              command: "uvx"
+              args: ["mcp-server-fetch"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    - id: Frontend Developer
+      type: agent
+      description: "Phase 04b — Implements frontend code (UI components, pages, state management)."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Senior Frontend Developer. Implement the frontend based on the task plan, UX specs, and API contracts.
+
+          You have access to:
+          - Sequential Thinking: plan component architecture before coding
+          - Context7: look up framework/library API docs (React, Vue, etc.)
+          - DeepWiki: read GitHub repo docs for UI frameworks
+          - Exa Search: find UI patterns and component examples
+          - Filesystem: explore project structure
+          - Web Fetch: look up technical references
+          - File and code execution tools
+
+          PROCESS:
+          1. Read backend code to understand API contracts and endpoints
+          2. Set up frontend project structure if needed
+          3. Implement UI components following UX specifications
+          4. Connect to backend APIs with proper error handling
+          5. Implement state management
+          6. Add loading states, error states, and empty states
+          7. Install dependencies and verify builds
+
+          RULES:
+          - Write clean, component-based code
+          - Implement responsive layouts
+          - Handle all API error states gracefully
+          - Follow existing project conventions
+          - No hardcoded API URLs — use environment config
+          - Implement ALL components completely — no placeholders
+
+          After completing, provide a summary of implemented components and pages.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            config:
+              command: "uvx"
+              args: ["mcp-server-fetch"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    - id: Integration Engineer
+      type: agent
+      description: "Phase 04c — Connects backend and frontend, wires API calls, ensures end-to-end data flow."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are an Integration Engineer. Connect backend and frontend, ensuring end-to-end data flow works.
+
+          You have access to:
+          - Sequential Thinking: trace data flow across system boundaries
+          - Context7: look up API client libraries, HTTP clients, CORS config
+          - Filesystem: explore both backend and frontend code
+
+          PROCESS:
+          1. Read both backend and frontend code
+          2. Verify API contracts match between backend endpoints and frontend calls
+          3. Fix any mismatches in URLs, request/response schemas, or auth headers
+          4. Configure CORS, proxy settings, environment variables
+          5. Ensure error responses are properly handled end-to-end
+          6. Verify the application can start and serve requests
+
+          RULES:
+          - Fix ONLY integration issues — do not refactor working code
+          - Ensure consistent environment configuration
+          - Verify all API endpoints are correctly wired
+          - Test that the app starts without import/config errors
+
+          After completing, summarize integration changes and verified data flows.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 5: Quality Assurance
+    # ══════════════════════════════════════════════════════════════════
+    - id: QA Engineer
+      type: agent
+      description: "Phase 05a — Runs functional and integration tests."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a QA Engineer. Run comprehensive functional tests on the complete project.
+
+          You have access to:
+          - Context7: look up testing patterns and framework test APIs
+          - Filesystem: find test files, understand project structure
+
+          PROCESS:
+          1. Read all source code to understand the project
+          2. Run the test suite if one exists (using uv_run with timeout 30s)
+          3. If no test suite, run the main application and verify it starts correctly
+          4. Check that all API endpoints respond correctly
+          5. Verify database operations work
+          6. Check frontend renders without errors
+          7. Verify end-to-end user flows
+
+          IMPORTANT:
+          - Always set timeout of 30 seconds for code execution
+          - If the app is a server, timeout is expected — check logs for successful startup
+          - Test both happy path and error cases
+
+          DECISION (your last line MUST contain one of these):
+          - All good: "QA_PASS: [summary of tests performed and results]"
+          - Issues found: "QA_FAIL: [specific issues with file:line references]"
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
+    - id: QA Fix Counter
+      type: loop_counter
+      description: Limits QA bug-fix iterations to 3.
+      context_window: 0
+      config:
+        max_iterations: 3
+        reset_on_emit: true
+        message: Maximum QA fix iterations reached. Proceeding to automated tests.
+
+    - id: QA Bug Fixer
+      type: agent
+      description: "Fixes functional bugs found by QA Engineer."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Bug Fixer. Fix the specific bugs reported by the QA Engineer.
+
+          You have access to:
+          - Sequential Thinking: analyze root cause step by step
+          - Context7: look up correct API usage if the bug is library-related
+          - DeepWiki: read framework docs for troubleshooting
+          - Exa Search: find solutions for specific error messages
+          - Filesystem: locate bug-related files quickly
+
+          RULES:
+          - Fix ONLY the reported bugs — do NOT refactor unrelated code
+          - Make minimal, targeted changes
+          - Save all fixed files
+          - Verify your fix addresses the reported issue
+
+          After fixing, provide a brief summary of changes.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    - id: SDET
+      type: agent
+      description: "Phase 05b — Writes and runs automated test suites."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Software Development Engineer in Test (SDET). Write and execute automated tests.
+
+          You have access to:
+          - Sequential Thinking: design test strategy and coverage plan
+          - Context7: look up testing framework APIs (pytest, jest, etc.)
+          - Filesystem: explore project structure and existing tests
+
+          PROCESS:
+          1. Analyze the codebase to identify testable units
+          2. Write unit tests for core business logic
+          3. Write integration tests for API endpoints
+          4. Write end-to-end tests for critical user flows
+          5. Run all tests and report results
+          6. Ensure test coverage for edge cases and error paths
+
+          RULES:
+          - Use the project's existing test framework if present
+          - Follow AAA pattern (Arrange, Act, Assert)
+          - Test both success and failure scenarios
+          - Mock external dependencies appropriately
+          - Set timeout of 30 seconds for test execution
+
+          OUTPUT: Provide test results with pass/fail counts and any coverage metrics.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 6: Security Audit
+    # ══════════════════════════════════════════════════════════════════
+    - id: Security Auditor
+      type: agent
+      description: "Phase 06 — Scans code for security vulnerabilities and compliance issues."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Security Auditor. Scan the implemented code for vulnerabilities.
+
+          You have access to:
+          - Sequential Thinking: systematically check each vulnerability class
+          - Context7: verify secure coding patterns for the frameworks used
+          - Exa Search: research CVEs for dependencies, find security best practices
+          - Filesystem: scan all project files
+
+          CHECK LIST (OWASP Top 10):
+          1. Injection (SQL, command, XSS)
+          2. Broken authentication
+          3. Sensitive data exposure
+          4. XML external entities (XXE)
+          5. Broken access control
+          6. Security misconfiguration
+          7. Cross-Site Scripting (XSS)
+          8. Insecure deserialization
+          9. Using components with known vulnerabilities
+          10. Insufficient logging & monitoring
+
+          ALSO CHECK:
+          - Hardcoded secrets or credentials
+          - Insecure default configurations
+          - Missing input validation
+          - Improper error handling that leaks info
+
+          DECISION (your last line MUST contain one of these):
+          - Secure: "SEC_PASS: [summary of audit findings — no critical issues]"
+          - Vulnerabilities found: "SEC_FAIL: [critical issues with file:line references]"
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+
+    - id: Security Fix Counter
+      type: loop_counter
+      description: Limits security fix iterations to 2.
+      context_window: 0
+      config:
+        max_iterations: 2
+        reset_on_emit: true
+        message: Maximum security fix iterations reached. Proceeding to operations.
+
+    - id: Security Bug Fixer
+      type: agent
+      description: "Fixes security vulnerabilities found by the Security Auditor."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Security Bug Fixer. Fix the security vulnerabilities reported by the auditor.
+
+          You have access to:
+          - Sequential Thinking: analyze vulnerability root cause
+          - Context7: look up secure coding patterns for the frameworks used
+          - Filesystem: locate vulnerable files
+
+          RULES:
+          - Fix ONLY the reported security issues
+          - Use established secure coding patterns (parameterized queries, output encoding, etc.)
+          - Do NOT weaken security controls
+          - Save all fixed files
+
+          After fixing, summarize each fix with the vulnerability class addressed.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 7: Operations
+    # ══════════════════════════════════════════════════════════════════
+    - id: DevOps Engineer
+      type: agent
+      description: "Phase 07a — Creates CI/CD pipeline, Dockerfile, and deployment configuration."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a DevOps Engineer. Set up deployment infrastructure for the project.
+
+          You have access to:
+          - Sequential Thinking: plan deployment pipeline stages
+          - Context7: look up Docker, CI/CD, and deployment tool docs
+          - Filesystem: explore project structure
+          - Web Fetch: look up deployment best practices
+
+          DELIVERABLES:
+          1. Dockerfile (multi-stage build, minimal image)
+          2. docker-compose.yml (if multi-service)
+          3. CI/CD pipeline config (.github/workflows/ or similar)
+          4. Environment configuration templates (.env.example)
+          5. Build and deploy scripts
+
+          RULES:
+          - Use multi-stage Docker builds for minimal image size
+          - Never hardcode secrets in Dockerfiles or CI configs
+          - Use environment variables for all configuration
+          - Include health check endpoints
+          - Pin dependency versions
+
+          After completing, summarize the deployment setup and how to use it.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            config:
+              command: "uvx"
+              args: ["mcp-server-fetch"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
+    - id: SRE
+      type: agent
+      description: "Phase 07b — Sets up monitoring, logging, and observability."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Site Reliability Engineer. Set up monitoring and observability for the project.
+
+          You have access to:
+          - Sequential Thinking: plan monitoring strategy
+          - Context7: look up monitoring library APIs
+          - Filesystem: explore project structure
+
+          DELIVERABLES:
+          1. Health check endpoint implementation
+          2. Structured logging configuration
+          3. Error tracking setup (error boundaries, exception handlers)
+          4. Performance monitoring hooks (if applicable)
+          5. Alerting rules or thresholds documentation
+
+          RULES:
+          - Use structured logging (JSON format)
+          - Add correlation IDs for request tracing
+          - Log at appropriate levels (ERROR for failures, INFO for operations, DEBUG for details)
+          - Do not log sensitive data (passwords, tokens, PII)
+
+          After completing, summarize the observability setup.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 8: Final Review & Delivery
+    # ══════════════════════════════════════════════════════════════════
+    - id: Final Review
+      type: human
+      description: "Phase 08 — User reviews the complete project."
+      context_window: 0
+      config:
+        description: |
+          The project development, testing, security audit, and operations setup are complete.
+          Review the results above.
+
+          → Type "approve" to generate documentation and finish.
+          → Or provide feedback for additional changes.
+
+    - id: Final Revision Counter
+      type: loop_counter
+      description: Limits final revision cycles to 2.
+      context_window: 0
+      config:
+        max_iterations: 2
+        reset_on_emit: true
+        message: Maximum final revisions reached. Proceeding to documentation.
+
+    - id: Technical Writer
+      type: agent
+      description: "Phase 09a — Generates project documentation."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Technical Writer. Generate comprehensive project documentation.
+
+          You have access to:
+          - Filesystem: directory_tree for project layout, search_files for content
+          - Web Fetch: look up documentation standards
+
+          DELIVERABLES:
+          1. README.md:
+             - Project overview
+             - Prerequisites
+             - Installation instructions
+             - Configuration (environment variables)
+             - Usage instructions (how to run, API docs)
+             - Project structure
+             - Deployment guide
+          2. API documentation (if applicable)
+          3. CHANGELOG.md
+
+          RULES:
+          - Write for someone new to the project
+          - Include all commands needed to get started
+          - Document all environment variables
+          - Add code examples for API usage
+
+          Save all documentation files.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "uvx"
+              args: ["mcp-server-fetch"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
+    - id: Delivery Manager
+      type: agent
+      description: "Phase 09b — Produces final delivery summary."
+      context_window: 0
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are the Delivery Manager. Produce a final delivery summary.
+
+          OUTPUT FORMAT:
+          ## Delivery Summary
+
+          ### Project Overview
+          [Brief description]
+
+          ### Features Implemented
+          1. [Feature] — Status: [complete/partial]
+
+          ### Architecture
+          - Backend: [tech]
+          - Frontend: [tech]
+          - Database: [tech]
+          - Infrastructure: [tech]
+
+          ### Files Created/Modified
+          - [path] — [purpose]
+
+          ### How to Run
+          [Step-by-step]
+
+          ### Test Results
+          - [test type]: [results]
+
+          ### Security Audit
+          - [findings summary]
+
+          ### Known Limitations
+          - [issues]
+
+          ### Recommended Next Steps
+          - [improvements]
+
+          Be concise and factual.
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+
+  # ════════════════════════════════════════════════════════════════════
+  # EDGES
+  # ════════════════════════════════════════════════════════════════════
+  edges:
+    # ─── USER context propagation (keep_message, no trigger) ───
+    - from: USER
+      to: Business Analyst
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Tech Lead
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: QA Engineer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Technical Writer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: USER
+      to: Delivery Manager
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # ─── Architecture context propagation ───
+    - from: Solution Architect
+      to: Tech Lead
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: Solution Architect
+      to: Backend Developer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: Solution Architect
+      to: Frontend Developer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # ─── Plan context propagation to developers ───
+    - from: Tech Lead
+      to: Backend Developer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: Tech Lead
+      to: Frontend Developer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+    - from: Tech Lead
+      to: Integration Engineer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # ─── Requirements context for BA output ───
+    - from: Business Analyst
+      to: Tech Lead
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    # ═══ Phase 1: Discovery ═══
+    - from: Business Analyst
+      to: UX Designer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    - from: UX Designer
+      to: Solution Architect
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    # ═══ Phase 2: Architecture ═══
+    - from: Solution Architect
+      to: Security Reviewer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    - from: Security Reviewer
+      to: DBA
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    # ═══ Phase 3: Planning ═══
+    - from: DBA
+      to: Tech Lead
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    - from: Tech Lead
+      to: Plan Approval
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    # Approval → proceed to development
+    - from: Plan Approval
+      to: Backend Developer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [approve, onay, tamam]
+          none: []
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # Approval → rejection → revision counter
+    - from: Plan Approval
+      to: Plan Revision Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [approve, onay, tamam]
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # Revision counter → back to Tech Lead (not exhausted)
+    - from: Plan Revision Counter
+      to: Tech Lead
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [LOOP_EXIT]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Revision counter → proceed to dev (exhausted)
+    - from: Plan Revision Counter
+      to: Backend Developer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # ═══ Phase 4: Development (sequential) ═══
+    - from: Backend Developer
+      to: Frontend Developer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    - from: Frontend Developer
+      to: Integration Engineer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    # ═══ Phase 5: Quality Assurance ═══
+    - from: Integration Engineer
+      to: QA Engineer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    # QA PASS → SDET
+    - from: QA Engineer
+      to: SDET
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [QA_PASS]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # QA FAIL → QA Fix Counter
+    - from: QA Engineer
+      to: QA Fix Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [QA_PASS]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # QA Fix Counter → Bug Fixer (not exhausted)
+    - from: QA Fix Counter
+      to: QA Bug Fixer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [LOOP_EXIT]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # QA Fix Counter → SDET (exhausted, skip to automated tests)
+    - from: QA Fix Counter
+      to: SDET
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # Bug Fixer → back to QA
+    - from: QA Bug Fixer
+      to: QA Engineer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    # ═══ Phase 6: Security Audit ═══
+    - from: SDET
+      to: Security Auditor
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    # Security PASS → DevOps
+    - from: Security Auditor
+      to: DevOps Engineer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [SEC_PASS]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # Security FAIL → Security Fix Counter
+    - from: Security Auditor
+      to: Security Fix Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [SEC_PASS]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Security Fix Counter → Security Bug Fixer (not exhausted)
+    - from: Security Fix Counter
+      to: Security Bug Fixer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [LOOP_EXIT]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Security Fix Counter → DevOps (exhausted)
+    - from: Security Fix Counter
+      to: DevOps Engineer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # Security Bug Fixer → back to Security Auditor
+    - from: Security Bug Fixer
+      to: Security Auditor
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    # ═══ Phase 7: Operations ═══
+    - from: DevOps Engineer
+      to: SRE
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    # ═══ Phase 8: Final Review ═══
+    - from: SRE
+      to: Final Review
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+    # Final Review → approve → Technical Writer
+    - from: Final Review
+      to: Technical Writer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [approve, onay, tamam]
+          none: []
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # Final Review → reject → Final Revision Counter
+    - from: Final Review
+      to: Final Revision Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [approve, onay, tamam]
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    # Final Revision Counter → QA Bug Fixer (not exhausted)
+    - from: Final Revision Counter
+      to: QA Bug Fixer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [LOOP_EXIT]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Final Revision Counter → Technical Writer (exhausted)
+    - from: Final Revision Counter
+      to: Technical Writer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # ═══ Phase 9: Documentation & Delivery ═══
+    - from: Technical Writer
+      to: Delivery Manager
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
+  initial_instruction: >
+    Describe the software project you want to build.
+    Include: what the application should do, target platform, programming language,
+    key features, and any specific technical requirements.
+
+vars: {}
