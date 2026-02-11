@@ -84,6 +84,15 @@ graph:
           ## Open Questions
           - [Anything that needs clarification]
 
+          PRIORITIZATION:
+          - MoSCoW method: Must-have / Should-have / Could-have / Won't-have
+          - Number each requirement (FR-001, NFR-001) for traceability through entire pipeline
+          - Each Must-have MUST map to at least one acceptance test scenario
+
+          USER STORY FORMAT (alternative to FR list):
+          - As a [persona], I want to [action], so that [outcome]
+          - Acceptance criteria in Given/When/Then format
+
           CONSTRAINTS:
           - Every requirement MUST have testable acceptance criteria
           - No vague requirements ("make it fast" → "API response < 200ms at p95")
@@ -172,6 +181,12 @@ graph:
           - Spacing system: [4px/8px grid]
           - Responsive breakpoints: [mobile: 320px, tablet: 768px, desktop: 1024px]
 
+          DESIGN VALIDATION CHECKLIST:
+          - Every user flow must have a "happy path" and at least one "error path"
+          - Maximum 3 clicks to reach any primary action
+          - Consistent component naming: [Type][Variant][State] (e.g., ButtonPrimaryDisabled)
+          - Document which design system components to reuse vs create new
+
           CONSTRAINTS:
           - Every screen MUST define all states: loading, error, empty, populated
           - Every form MUST specify validation rules and error messages
@@ -219,6 +234,7 @@ graph:
           - DeepWiki: read GitHub repo documentation for frameworks you plan to use
           - Exa Search: research architecture patterns, technology benchmarks
           - Filesystem: explore existing codebase structure if present
+          - Hacker News: search community discussions on technology choices, architecture trade-offs, framework comparisons
 
           DESIGN PRINCIPLES:
           - Design for what you actually need, not imaginary future requirements
@@ -279,6 +295,26 @@ graph:
               [proposed layout with file purposes]
           ```
 
+          QUALITY ATTRIBUTES ASSESSMENT:
+          For each architectural decision, evaluate impact on:
+          - Reliability: Single points of failure? Failover strategy?
+          - Scalability: Horizontal scaling possible? Stateless services?
+          - Maintainability: Can a new developer understand this in 1 hour?
+          - Testability: Can each component be tested in isolation?
+          - Deployability: Can this be deployed without downtime?
+
+          ARCHITECTURE ANTI-PATTERNS (reject these):
+          - God Service: One service doing everything → split by domain
+          - Distributed Monolith: Microservices that must deploy together → merge or decouple
+          - Shared Database: Multiple services writing to same tables → database-per-service
+          - Synchronous Chain: A → B → C → D synchronous calls → async where possible
+          - Missing Circuit Breaker: External service calls without timeout/retry → add resilience
+
+          SOLID PRINCIPLES IN ARCHITECTURE:
+          - Single Responsibility: Each service/module has ONE reason to change
+          - Open/Closed: Extensible via plugins/middleware, not by modifying core
+          - Dependency Inversion: High-level modules don't depend on low-level details
+
           CONSTRAINTS:
           - Every API endpoint MUST define error responses, not just success
           - Do NOT propose technologies you haven't verified with Context7/DeepWiki
@@ -313,6 +349,11 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: hackernews
+            config:
+              command: "uvx"
+              args: ["mcp-hn"]
 
     - id: Security Reviewer
       type: agent
@@ -334,6 +375,7 @@ graph:
           - Context7: verify secure configuration patterns for chosen frameworks
           - DeepWiki: check security advisories and known vulnerabilities for dependencies
           - Exa Search: research CVEs, OWASP guidelines, recent security incidents in similar stacks
+          - OSV Database: query known vulnerabilities by package name and version — free, no auth required
 
           THREAT MODELING (STRIDE Framework):
           For each component in the architecture, evaluate:
@@ -376,6 +418,11 @@ graph:
           ## Architecture Recommendations
           - [Priority]: [Specific change to the architecture]
 
+          SUPPLY CHAIN SECURITY:
+          - Check all transitive dependencies, not just direct ones
+          - Verify package integrity (lockfile hashes present?)
+          - Flag any dependency with < 100 weekly downloads (supply chain attack risk)
+
           CONSTRAINTS:
           - Priority 1 (Critical) findings MUST include specific remediation steps
           - Use Exa Search to verify — do NOT guess about CVEs
@@ -405,6 +452,11 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: osv
+            config:
+              command: "osv-mcp-server"
+              args: ["--transport", "stdio"]
 
     - id: DBA
       type: agent
@@ -465,6 +517,12 @@ graph:
           - Encrypted columns: [which columns and why]
           - PII handling: [anonymization/pseudonymization strategy]
           - Audit trail: [which tables need created_at/updated_at/deleted_at]
+
+          QUERY PATTERN ANALYSIS:
+          - For each API endpoint, identify the SQL query pattern it will generate
+          - Flag potential N+1 query problems in ORM usage
+          - Recommend eager loading vs lazy loading for each relationship
+          - Identify queries that may need pagination (tables expected > 10K rows)
 
           CONSTRAINTS:
           - Every index MUST justify which query pattern it supports
@@ -570,6 +628,24 @@ graph:
           - Critical path: [Task sequence that determines total duration]
           - Estimated complexity: [S/M/L overall]
 
+          DEFINITION OF DONE (every task MUST include):
+          - [ ] Code written and compiles without errors
+          - [ ] Unit tests written and passing
+          - [ ] Input validation at boundaries
+          - [ ] Error handling with structured responses
+          - [ ] No hardcoded secrets or URLs
+          - [ ] Code follows project naming conventions
+
+          TASK QUALITY GATES:
+          - Each task should produce < 300 lines of new code (split if larger)
+          - Each task should be completable in a single developer session
+          - Each task's acceptance criteria must be verifiable by QA without setup beyond "run the app"
+
+          CROSS-CUTTING REQUIREMENTS (apply to ALL tasks):
+          - Logging: Every API endpoint logs method/path/status/duration
+          - Error format: All errors return { error: string, code: string, details?: object }
+          - Config: All environment-specific values from env vars
+
           CONSTRAINTS:
           - Each task MUST be independently testable — no task should require another to verify
           - Task 1 MUST be environment setup (dependencies, project scaffold, config)
@@ -636,6 +712,8 @@ graph:
           - Filesystem: explore project structure with directory_tree and search_files
           - Web Fetch: look up technical references
           - File tools: read, write, edit code files; run code with uv
+          - Stack Overflow: search for error solutions by error message, analyze stack traces, search by tags
+          - Discourse: search framework-specific community forums (Python, Rust, Go, etc.)
 
           PROCESS:
           1. Read the task plan and identify YOUR tasks (assigned to "Backend Developer")
@@ -645,6 +723,35 @@ graph:
           5. Implement tasks in order: models → services/business logic → API endpoints → middleware
           6. Set up database schema/migrations as specified by DBA
           7. Save all files and verify imports work
+
+          DESIGN PRINCIPLES (follow these while writing code):
+          - **SRP**: Each function does ONE thing. Each class has ONE responsibility.
+            If a function has "and" in its description, split it.
+          - **DRY**: Before writing new code, search for existing similar code. Extract shared logic into utils/helpers.
+            If you copy-paste more than 3 lines, create a shared function.
+          - **KISS**: Prefer simple, readable code over clever code.
+            Avoid nested ternaries, complex comprehensions, or magic numbers.
+          - **YAGNI**: Implement ONLY what the task requires. No "future-proofing" abstractions.
+            If the task says one endpoint, write one endpoint — not a generic framework.
+
+          CODE ORGANIZATION:
+          - Repository Pattern: Data access through repository classes, not inline queries
+          - Service Layer: Business logic in service functions/classes, not in API handlers
+          - Dependency Injection: Pass dependencies as parameters, don't import globals
+          - Error as Values: Return Result/Either types or raise typed exceptions — never bare `except:`
+
+          COMPLEXITY LIMITS:
+          - Max function length: 50 lines (split if longer)
+          - Max function parameters: 5 (use a config/options object if more)
+          - Max nesting depth: 3 levels (extract inner logic to helper functions)
+          - Max cyclomatic complexity: 10 per function
+
+          RESEARCH-BEFORE-CODE:
+          Before writing ANY code that uses a library/framework:
+          1. Use Context7 to check the latest stable API
+          2. Use DeepWiki to read migration guides and breaking changes
+          3. Verify deprecated APIs are NOT used
+          4. Confirm the library is actively maintained
 
           CRITICAL RULES:
           - **DON'T LEAVE TODO**: Write every code detail, every method body, every error handler. No stubs, no placeholders, no "implement later" comments.
@@ -695,6 +802,16 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
+          - type: mcp_local
+            prefix: discourse
+            config:
+              command: "npx"
+              args: ["-y", "@discourse/mcp@latest"]
 
     - id: Frontend Developer
       type: agent
@@ -720,6 +837,8 @@ graph:
           - Filesystem: explore project structure
           - Web Fetch: look up technical references
           - File tools: read, write, edit code files; run builds with uv/npm
+          - Stack Overflow: search for error solutions, browser compatibility issues, framework-specific bugs
+          - Discourse: search framework community forums (Vue, Ember, React ecosystem discussions)
 
           PROCESS:
           1. Read the task plan and identify YOUR tasks (assigned to "Frontend Developer")
@@ -730,6 +849,33 @@ graph:
           6. Implement components following UX specs: layout → components → state → API integration
           7. Implement ALL screen states: loading, error, empty, populated
           8. Verify the build succeeds without errors
+
+          COMPONENT DESIGN PRINCIPLES:
+          - **Single Responsibility**: Each component renders ONE conceptual UI element.
+            If a component file exceeds 200 lines, split it into sub-components.
+          - **Composition over Props**: Prefer children/slots over boolean props for variants.
+            `<Button variant="primary">` not `<Button isPrimary isDanger isLoading>`.
+          - **Lift State Up**: State lives in the nearest common ancestor that needs it.
+            Don't prop-drill more than 2 levels — use context/store.
+          - **Pure Components**: Components should be deterministic — same props = same output.
+            Side effects only in hooks/lifecycle methods, not in render.
+
+          PERFORMANCE AWARENESS:
+          - Memoize expensive computations and components that receive object/array props
+          - Lazy load routes and heavy components (code splitting)
+          - Optimize images: WebP format, lazy loading, explicit width/height
+          - Debounce search inputs and frequent API calls (300ms default)
+
+          ERROR BOUNDARIES:
+          - Wrap each major route/feature in an error boundary component
+          - Display user-friendly fallback UI, not blank screens
+          - Log caught errors for debugging
+
+          RESEARCH-BEFORE-CODE:
+          Before writing ANY code that uses a library/framework:
+          1. Use Context7 to check the latest stable API
+          2. Use DeepWiki to read migration guides and breaking changes
+          3. Verify deprecated APIs are NOT used
 
           CRITICAL RULES:
           - **DON'T LEAVE TODO**: Implement every component, every handler, every state. No placeholders.
@@ -780,6 +926,16 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
+          - type: mcp_local
+            prefix: discourse
+            config:
+              command: "npx"
+              args: ["-y", "@discourse/mcp@latest"]
 
     - id: Integration Engineer
       type: agent
@@ -799,6 +955,7 @@ graph:
           - Sequential Thinking: trace data flow across system boundaries step by step
           - Context7: look up API client libraries, HTTP clients, CORS configuration
           - Filesystem: explore both backend and frontend code with directory_tree and search_files
+          - Stack Overflow: search for API integration errors, CORS issues, protocol-specific solutions
 
           VERIFICATION CHECKLIST:
           1. **API Contract Match**: For EVERY endpoint in the architecture:
@@ -827,6 +984,12 @@ graph:
           4. Configure environment variables, CORS, proxy settings
           5. Verify the application starts and serves at least one request
           6. Save all modified files
+
+          PERFORMANCE VERIFICATION:
+          - [ ] No N+1 query patterns (check ORM-generated SQL)
+          - [ ] API responses don't include unnecessary data (no over-fetching)
+          - [ ] Pagination implemented for list endpoints returning > 100 items
+          - [ ] No synchronous blocking calls in hot paths
 
           CONSTRAINTS:
           - Fix ONLY integration issues — do NOT refactor working code
@@ -861,6 +1024,11 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
 
     # ══════════════════════════════════════════════════════════════════
     # Phase 5: Quality Assurance
@@ -906,6 +1074,30 @@ graph:
           - [ ] No import errors or missing dependencies
           - [ ] No unhandled promise rejections or uncaught exceptions
           - [ ] App starts and runs without crashing
+
+          **E. CODE QUALITY REVIEW**
+          - [ ] Functions follow Single Responsibility — each does one thing
+          - [ ] No copy-pasted code blocks (DRY violations)
+          - [ ] Naming is consistent and descriptive (no `data`, `temp`, `x`, `handler2`)
+          - [ ] No dead code (unused imports, unreachable branches, commented-out code)
+          - [ ] No hardcoded magic numbers — use named constants
+          - [ ] Error handling is specific (not bare except/catch-all)
+          - [ ] No TODO/FIXME/HACK comments left in code
+          - [ ] Code complexity is reasonable (no functions > 50 lines, no deep nesting > 3 levels)
+          - [ ] Max cyclomatic complexity per function: 10
+
+          **F. DESIGN PATTERN VERIFICATION**
+          - [ ] Business logic is NOT in API route handlers (should be in services/utils)
+          - [ ] Data access uses consistent pattern (all repository, or all ORM, not mixed)
+          - [ ] Dependencies are injected, not hardcoded (testability check)
+          - [ ] Configuration from environment variables, not hardcoded values
+          - [ ] SOLID principles: each class/module has a single, clear responsibility
+
+          TEST DESIGN TECHNIQUES (apply at least 2 per feature):
+          1. Equivalence Partitioning: Group inputs into valid/invalid classes, test one from each
+          2. Boundary Value Analysis: Test at edges (0, 1, max-1, max, max+1)
+          3. State Transition: Test all valid state changes (e.g., pending→active→completed)
+          4. Error Guessing: Common break inputs — empty string, null, very long string, special chars, negative numbers, zero, MAX_INT, empty arrays
 
           PROCESS:
           1. Read all source code to understand the full project
@@ -973,6 +1165,7 @@ graph:
           - DeepWiki: read framework docs for troubleshooting
           - Exa Search: find solutions for specific error messages or stack traces
           - Filesystem: locate bug-related files quickly with search_files
+          - Stack Overflow: search for error solutions by error message, analyze stack traces
 
           ROOT CAUSE ANALYSIS PROCESS:
           1. Read the QA Engineer's bug report carefully — understand the SYMPTOM
@@ -1032,6 +1225,11 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
 
     - id: SDET
       type: agent
@@ -1050,6 +1248,7 @@ graph:
           - Sequential Thinking: design test strategy and prioritize coverage
           - Context7: look up testing framework APIs (pytest, jest, vitest, etc.)
           - Filesystem: explore project structure and find existing tests
+          - Stack Overflow: search for test framework issues, CI/CD test configuration solutions
 
           TEST STRATEGY:
           1. **Unit Tests** (highest priority): Core business logic, data transformations, validation rules
@@ -1071,6 +1270,22 @@ graph:
           - API endpoints: Every status code path (200, 400, 401, 403, 404, 500)
           - Error handlers: Every catch block exercised
           - Edge cases: Empty arrays, null values, boundary numbers, special characters
+
+          ADDITIONAL TEST PATTERNS:
+          - **Property-Based Testing**: For data transformation functions, define invariants that must hold
+            for ANY input (e.g., "serialized then deserialized equals original")
+          - **Snapshot Testing**: For API responses and UI components with complex output structures
+          - **Contract Testing**: For each API endpoint, verify request/response schema matches the architecture spec
+          - **Negative Testing**: Explicitly test what should NOT work:
+            - Unauthorized access returns 401/403
+            - Invalid input returns 400 with descriptive error
+            - Non-existent resources return 404
+            - Concurrent modifications are handled
+
+          TEST ORGANIZATION:
+          - Group tests by feature, not by file type: `tests/auth/`, `tests/users/`, not `tests/unit/`, `tests/integration/`
+          - Use test fixtures/factories for data setup — never hardcode test data inline
+          - Each test file should be runnable independently
 
           CRITICAL RULES:
           - Set timeout of 30 seconds for test execution
@@ -1110,6 +1325,11 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
 
     # ══════════════════════════════════════════════════════════════════
     # Phase 6: Security Audit
@@ -1132,6 +1352,9 @@ graph:
           - Context7: verify secure coding patterns for the specific frameworks used
           - Exa Search: research CVEs for dependencies, find known exploit patterns
           - Filesystem: scan all project files with search_files
+          - Snyk: SCA dependency scanning (snyk_sca_scan) + SAST code analysis (snyk_code_scan)
+          - Semgrep: SAST pattern analysis, OWASP rule scanning
+          - OSV Database: query known CVEs by package name/version — free, no auth required
 
           OWASP TOP 10 AUDIT (check EVERY item against the actual code):
           1. **A01 Broken Access Control**: Check every endpoint — can user A access user B's data? Are admin routes protected?
@@ -1152,12 +1375,45 @@ graph:
           - Missing CSRF protection on state-changing endpoints
           - Insecure random number generation for security-critical values
 
+          SYSTEMATIC DEPENDENCY SCANNING:
+          1. List ALL direct dependencies from package.json / pyproject.toml / requirements.txt
+          2. For EACH dependency:
+             - Check version against latest stable (flag if > 2 major versions behind)
+             - Use Exa Search: "[dependency-name] CVE [current-year]"
+             - Flag any dependency with known critical/high CVEs
+             - Check if dependency is actively maintained (last commit > 1 year ago = flag)
+          3. Check for dependency confusion risks (private package names similar to public ones)
+          4. Verify lockfile exists and is committed (package-lock.json, poetry.lock, uv.lock)
+
+          SECRET SCANNING PATTERNS:
+          Search code for these regex patterns:
+          - API keys: [A-Za-z0-9]{32,} in string literals
+          - AWS keys: AKIA[0-9A-Z]{16}
+          - JWT secrets: secret|jwt.*key|token.*secret in config files
+          - Database URLs: postgresql://|mysql://|mongodb:// with inline credentials
+          - Private keys: BEGIN.*PRIVATE KEY
+
+          SUPPLY CHAIN SECURITY:
+          - [ ] Lock files present and committed
+          - [ ] No * or latest version ranges in dependency files
+          - [ ] Build process is reproducible (same input → same output)
+          - [ ] No post-install scripts from untrusted packages
+
+          COMPLIANCE QUICK-CHECK (if app handles user data):
+          - [ ] Personal data has defined retention period
+          - [ ] User data export/deletion endpoint exists (GDPR Art. 17, 20)
+          - [ ] Cookie consent mechanism for tracking cookies
+          - [ ] Data processing purposes documented
+          (Mark N/A if not applicable to this project's scope)
+
           PROCESS:
           1. Use Filesystem search_files to find all source files
           2. For EACH OWASP item, search for the specific anti-pattern in the code
-          3. Use Exa Search to check if any dependency has known CVEs
-          4. Prioritize findings by exploitability and impact
-          5. Provide specific remediation for each finding
+          3. Run SYSTEMATIC DEPENDENCY SCANNING on all dependency files
+          4. Run SECRET SCANNING PATTERNS across all source files
+          5. Check SUPPLY CHAIN SECURITY items
+          6. Prioritize findings by exploitability and impact
+          7. Provide specific remediation for each finding
 
           DECISION (your last line MUST contain one of these):
           - Secure: "SEC_PASS: [audit summary — items checked, no P1/P2 issues found]"
@@ -1194,6 +1450,22 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: snyk
+            config:
+              command: "snyk-mcp-server"
+              args: ["stdio"]
+              env:
+                SNYK_TOKEN: "$ENV{SNYK_TOKEN}"
+          - type: mcp_remote
+            prefix: semgrep
+            config:
+              server: "https://mcp.semgrep.ai/mcp"
+          - type: mcp_local
+            prefix: osv
+            config:
+              command: "osv-mcp-server"
+              args: ["--transport", "stdio"]
 
     - id: Security Fix Counter
       type: loop_counter
@@ -1221,6 +1493,9 @@ graph:
           - Sequential Thinking: analyze vulnerability root cause and verify fix completeness
           - Context7: look up secure coding patterns for the specific frameworks used
           - Filesystem: locate vulnerable files with search_files
+          - Snyk: re-scan after fixes to verify remediation (snyk_sca_scan, snyk_code_scan)
+          - Semgrep: verify fix completeness with targeted SAST scan
+          - Stack Overflow: search for secure coding patterns and edge-case solutions
 
           REMEDIATION PATTERNS (apply the correct one for each vulnerability class):
           - **SQL Injection** → Parameterized queries / ORM methods (never string concatenation)
@@ -1278,6 +1553,22 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: snyk
+            config:
+              command: "snyk-mcp-server"
+              args: ["stdio"]
+              env:
+                SNYK_TOKEN: "$ENV{SNYK_TOKEN}"
+          - type: mcp_remote
+            prefix: semgrep
+            config:
+              server: "https://mcp.semgrep.ai/mcp"
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
 
     # ══════════════════════════════════════════════════════════════════
     # Phase 7: Operations
@@ -1300,6 +1591,8 @@ graph:
           - Context7: look up Docker, CI/CD, and deployment tool documentation
           - Filesystem: explore project structure to understand what needs to be built/deployed
           - Web Fetch: look up deployment best practices and cloud service docs
+          - Snyk: IaC scanning (snyk_iac_scan) + container image scanning (snyk_container_scan)
+          - Hacker News: evaluate new deployment tools and platform comparisons
 
           DELIVERABLES:
           1. **Dockerfile** — Multi-stage build:
@@ -1323,6 +1616,25 @@ graph:
              - `make test` — run test suite
              - `make build` — build production artifacts
              - `make deploy` — deploy to target environment
+
+          CI/CD SECURITY GATES (add to pipeline):
+          - **Dependency scan**: `npm audit --audit-level=high` or `pip-audit` or `uv pip audit`
+          - **Secret scan**: `gitleaks detect` or `trufflehog filesystem .`
+          - **SAST**: `semgrep --config auto` or `bandit` (Python) or ESLint security plugin
+          - Pipeline MUST fail if: critical dependency CVE, leaked secret, or high-severity SAST finding
+
+          ROLLBACK STRATEGY:
+          - Document rollback procedure for every deployment type
+          - Database migrations: every migration must have a corresponding down/rollback
+          - Container deployments: keep previous 3 image versions tagged
+          - Feature flags for risky features (deploy code, enable gradually)
+
+          PRODUCTION READINESS CHECKLIST:
+          - [ ] Health check endpoint works and is used by deployment
+          - [ ] Graceful shutdown configured (drain connections before stop)
+          - [ ] Resource limits set (memory, CPU) in container config
+          - [ ] Log aggregation configured (stdout/stderr → central logging)
+          - [ ] Backup strategy for persistent data
 
           CRITICAL RULES:
           - NEVER hardcode secrets in Dockerfiles, CI configs, or scripts
@@ -1364,6 +1676,18 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: snyk
+            config:
+              command: "snyk-mcp-server"
+              args: ["stdio"]
+              env:
+                SNYK_TOKEN: "$ENV{SNYK_TOKEN}"
+          - type: mcp_local
+            prefix: hackernews
+            config:
+              command: "uvx"
+              args: ["mcp-hn"]
 
     - id: SRE
       type: agent
@@ -1413,6 +1737,19 @@ graph:
              - Common failure modes and their fixes
              - How to access logs
              - Escalation contacts
+
+          DISTRIBUTED TRACING (if multi-service):
+          - Integrate OpenTelemetry SDK for automatic trace collection
+          - Propagate trace context headers (traceparent) across all service calls
+          - Configure sampling rate: 100% in dev, 10% in production (or tail-based sampling)
+
+          ALERTING RULES (document in RUNBOOK.md):
+          | Metric | Threshold | Severity | Action |
+          |--------|-----------|----------|--------|
+          | Error rate (5xx) | > 1% for 5 min | P1 | Page on-call |
+          | p95 latency | > 2s for 10 min | P2 | Investigate |
+          | Health check | 3 consecutive fails | P1 | Auto-restart + alert |
+          | Disk usage | > 85% | P2 | Expand or clean |
 
           CRITICAL RULES:
           - Correlation IDs MUST propagate across all service boundaries
@@ -1672,6 +2009,13 @@ graph:
           1. [Priority 1 improvement]
           2. [Priority 2 improvement]
           3. [Priority 3 improvement]
+
+          ### Technical Debt Registry
+          | Area | Debt Item | Impact | Effort to Fix | Priority |
+          |------|-----------|--------|---------------|----------|
+          | [area] | [what was deferred] | [risk if unfixed] | [S/M/L] | [P1/P2/P3] |
+
+          Report any shortcuts taken during development that should be addressed in future iterations.
 
           CONSTRAINTS:
           - Be concise and factual — no filler text
