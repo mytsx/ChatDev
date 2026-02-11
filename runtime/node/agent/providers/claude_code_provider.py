@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from entity.configs import AgentConfig
+from entity.configs.node.tooling import McpLocalConfig, ToolingConfig
 from entity.messages import (
     Message,
     MessageRole,
@@ -157,9 +158,11 @@ class ClaudeCodeProvider(ModelProvider):
         existing_session = self.get_session(node_id) if node_id else None
         is_continuation = existing_session is not None
 
-        # Create MCP config for chatdev-reporter
+        # Create MCP config for chatdev-reporter + YAML-defined MCP servers
+        tooling_configs = getattr(self.config, "tooling", None) or []
         mcp_config_path = self._create_mcp_config(
             node_id or "", session_id, server_port,
+            tooling_configs=tooling_configs,
         ) if session_id else None
 
         # Build prompt (simplified for continuations)
@@ -626,33 +629,76 @@ class ClaudeCodeProvider(ModelProvider):
         node_id: str,
         session_id: str,
         server_port: int,
+        *,
+        tooling_configs: Optional[List[ToolingConfig]] = None,
     ) -> Optional[str]:
-        """Create a temporary MCP config JSON file for the chatdev-reporter server.
+        """Create a temporary MCP config JSON file.
 
-        Returns the path to the temp file, or None if creation fails.
+        Includes the built-in chatdev-reporter server and any ``mcp_local``
+        servers declared in the node's YAML tooling section.
+
+        Returns the path to the temp file, or *None* if creation fails.
         """
         try:
+            servers: Dict[str, Any] = {}
+
+            # --- built-in chatdev-reporter ---
             mcp_server_path = str(
                 Path(__file__).resolve().parents[4]
                 / "mcp_servers"
                 / "chatdev_reporter.py"
             )
-            if not Path(mcp_server_path).exists():
+            if Path(mcp_server_path).exists():
+                servers["chatdev-reporter"] = {
+                    "command": "python",
+                    "args": [mcp_server_path],
+                    "env": {
+                        "CHATDEV_SERVER_URL": f"http://127.0.0.1:{server_port}",
+                        "CHATDEV_SESSION_ID": session_id,
+                        "CHATDEV_NODE_ID": node_id,
+                    },
+                }
+
+            # --- YAML-defined mcp_local servers ---
+            if tooling_configs:
+                _seen_counter: Dict[str, int] = {}
+                for tc in tooling_configs:
+                    if tc.type != "mcp_local":
+                        continue
+                    cfg = tc.config
+                    if not isinstance(cfg, McpLocalConfig):
+                        continue
+
+                    # Derive server name: use prefix if given, else infer from
+                    # command/args (e.g. "npx -y @org/server-foo" → "server-foo")
+                    server_name = (tc.prefix or "").strip()
+                    if not server_name:
+                        server_name = ClaudeCodeProvider._infer_mcp_server_name(
+                            cfg.command, cfg.args,
+                        )
+
+                    # Deduplicate names
+                    if server_name in servers or server_name in _seen_counter:
+                        count = _seen_counter.get(server_name, 1) + 1
+                        _seen_counter[server_name] = count
+                        server_name = f"{server_name}-{count}"
+                    _seen_counter[server_name] = 1
+
+                    entry: Dict[str, Any] = {
+                        "command": cfg.command,
+                        "args": list(cfg.args) if cfg.args else [],
+                    }
+                    if cfg.env:
+                        entry["env"] = dict(cfg.env)
+                    if cfg.cwd:
+                        entry["cwd"] = cfg.cwd
+
+                    servers[server_name] = entry
+
+            if not servers:
                 return None
 
-            config = {
-                "mcpServers": {
-                    "chatdev-reporter": {
-                        "command": "python",
-                        "args": [mcp_server_path],
-                        "env": {
-                            "CHATDEV_SERVER_URL": f"http://127.0.0.1:{server_port}",
-                            "CHATDEV_SESSION_ID": session_id,
-                            "CHATDEV_NODE_ID": node_id,
-                        },
-                    }
-                }
-            }
+            config = {"mcpServers": servers}
 
             fd, path = tempfile.mkstemp(suffix=".json", prefix="chatdev_mcp_")
             with os.fdopen(fd, "w") as f:
@@ -660,6 +706,31 @@ class ClaudeCodeProvider(ModelProvider):
             return path
         except Exception:
             return None
+
+    @staticmethod
+    def _infer_mcp_server_name(command: str, args: List[str]) -> str:
+        """Derive a short MCP server name from its launch command.
+
+        Examples:
+            npx -y @modelcontextprotocol/server-fetch  → server-fetch
+            npx -y mapeg-oracle-db                      → mapeg-oracle-db
+            uvx some-tool                               → some-tool
+            python my_server.py                         → my-server
+        """
+        # Find the last non-flag argument — typically the package / script name
+        candidate = ""
+        for arg in (args or []):
+            if arg.startswith("-"):
+                continue
+            candidate = arg
+        if candidate:
+            name = candidate.rsplit("/", 1)[-1]  # @org/server-foo → server-foo
+            name = name.removesuffix(".py").removesuffix(".js")
+            name = name.replace("_", "-")
+            return name or "mcp-server"
+
+        # Fallback to command name itself
+        return command.replace("_", "-")
 
     @staticmethod
     def _cleanup_mcp_config(config_path: Optional[str]) -> None:
