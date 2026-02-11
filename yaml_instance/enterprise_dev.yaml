@@ -3,7 +3,7 @@ version: 0.4.0
 graph:
   id: enterprise_dev
   description: >
-    Enterprise software development workflow with 18 specialized agent roles.
+    Enterprise software development workflow with 26 nodes (18 agents, 2 human gates, 4 loop counters, 1 passthrough, 1 bug fixer).
     Discovery → Architecture → Planning → Development → QA → Security → Operations → Delivery.
   log_level: INFO
   is_majority_voting: false
