@@ -33,6 +33,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 40
         role: |
           You are a Senior Business Analyst. Your goal is to transform a vague user request into a precise, actionable requirements document.
 
@@ -127,6 +128,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 40
         role: |
           You are a UX/UI Designer. Your goal is to translate requirements into usable interface specifications that developers can implement directly.
 
@@ -223,6 +225,7 @@ graph:
         provider: claude-code
         name: opus
         skip_memory: true
+        max_turns: 50
         role: |
           You are a Solution Architect. Your goal is to design a concise, usable, complete software system that the development team can implement without ambiguity.
 
@@ -363,6 +366,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 50
         role: |
           You are a Security Architect. Your goal is to identify and mitigate security risks in the proposed architecture BEFORE any code is written.
 
@@ -466,6 +470,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 50
         role: |
           You are a Database Architect. Your goal is to design a performant, normalized database schema that enforces data integrity at the database level and supports all API contracts defined by the architect.
 
@@ -562,6 +567,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 45
         role: |
           You are a Tech Lead. Your goal is to break down the entire architecture into concrete, independently testable implementation tasks ordered by dependency.
 
@@ -696,6 +702,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 50
         role: |
           You are a Senior Backend Developer. Your goal is to write elegant, readable, extensible, efficient backend code that strictly follows the architecture and task plan.
 
@@ -821,6 +828,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 50
         role: |
           You are a Senior Frontend Developer. Your goal is to write clean, component-based, accessible frontend code that implements the UX specs and connects to the backend APIs.
 
@@ -945,6 +953,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 50
         role: |
           You are an Integration Engineer. Your goal is to ensure backend and frontend communicate correctly end-to-end — every API call wired, every data contract honored, every error handled.
 
@@ -1041,6 +1050,7 @@ graph:
         provider: claude-code
         name: opus
         skip_memory: true
+        max_turns: 40
         role: |
           You are a Senior Code Reviewer. Your goal is to ensure the codebase follows clean code principles, established design patterns, and is maintainable by a team.
 
@@ -1150,6 +1160,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 30
         role: |
           You are a Code Quality Fixer. Your goal is to fix the code quality issues reported by the Code Reviewer with minimal, targeted changes.
 
@@ -1228,6 +1239,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 40
         role: |
           You are a QA Engineer. Your goal is to verify that every functional requirement is met and the system works correctly end-to-end.
 
@@ -1323,6 +1335,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 30
         role: |
           You are a Bug Fixer. Your goal is to fix the specific bugs reported by the QA Engineer with minimal, targeted changes.
 
@@ -1408,6 +1421,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 40
         role: |
           You are a Software Development Engineer in Test (SDET). Your goal is to write comprehensive, CI-ready automated tests that prevent regressions and validate all critical paths.
 
@@ -1511,6 +1525,7 @@ graph:
         provider: claude-code
         name: opus
         skip_memory: true
+        max_turns: 40
         role: |
           You are a Security Auditor performing a code-level security assessment. Adopt an adversarial mindset: you are a skilled attacker with full source code access, looking for exploitable vulnerabilities.
 
@@ -1653,6 +1668,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 30
         role: |
           You are a Security Bug Fixer. Your goal is to remediate the specific security vulnerabilities reported by the auditor using established secure coding patterns.
 
@@ -1750,6 +1766,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 35
         role: |
           You are a DevOps Engineer. Your goal is to make deployments boring — safe, automatic, and repeatable with every commit.
 
@@ -1866,6 +1883,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 35
         role: |
           You are a Site Reliability Engineer. Your goal is to ensure the system is observable, debuggable, and fails gracefully — implementing the Three Pillars of Observability: logs, metrics, and traces.
 
@@ -1987,6 +2005,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 30
         role: |
           You are a Bug Fixer handling final review feedback. Your goal is to fix the specific issues reported by the reviewer with minimal, targeted changes.
 
@@ -2044,6 +2063,7 @@ graph:
         provider: claude-code
         name: sonnet
         skip_memory: true
+        max_turns: 25
         role: |
           You are a Technical Writer. Your goal is to create clear, actionable documentation that enables a new developer to understand, run, and contribute to this project within 30 minutes.
 
@@ -2134,6 +2154,7 @@ graph:
         provider: claude-code
         name: haiku
         skip_memory: true
+        max_turns: 25
         role: |
           You are the Delivery Manager. Your goal is to produce a concise, factual delivery summary that traces every original requirement to its implementation status.
 
@@ -2343,7 +2364,7 @@ graph:
 
     - from: Security Reviewer
       to: Tech Lead
-      trigger: false
+      trigger: true           # AND-join: DBA + SR tamamlanınca Tech Lead başlar
       condition: 'true'
       carry_data: true
       keep_message: true
@@ -2354,6 +2375,7 @@ graph:
       trigger: true
       condition: 'true'
       carry_data: true
+      keep_message: true      # DBA çıktısı Tech Lead context'ine girsin
 
     - from: Tech Lead
       to: Plan Approval
@@ -2411,6 +2433,7 @@ graph:
           regex: []
           case_sensitive: true
       carry_data: true
+      keep_message: true      # Ret gerekçesi Tech Lead context'ine girsin
 
     # Revision counter → proceed to dev (exhausted, parallel: Backend + Frontend)
     - from: Plan Revision Counter

@@ -186,11 +186,12 @@ class ClaudeCodeProvider(ModelProvider):
         cmd.append("--dangerously-skip-permissions")
 
         # Resume existing session or start new one
+        configured_turns = getattr(self.config, "max_turns", None)
         if existing_session:
             cmd.extend(["--resume", existing_session])
-            cmd.extend(["--max-turns", "20"])
+            cmd.extend(["--max-turns", str(configured_turns or 40)])
         else:
-            cmd.extend(["--max-turns", "15"])
+            cmd.extend(["--max-turns", str(configured_turns or 30)])
 
         if mcp_config_path:
             cmd.extend(["--mcp-config", mcp_config_path])
@@ -240,7 +241,7 @@ class ClaudeCodeProvider(ModelProvider):
                 cmd_retry = [client, "-p", prompt, "--output-format", "stream-json"]
                 cmd_retry.append("--verbose")
                 cmd_retry.append("--dangerously-skip-permissions")
-                cmd_retry.extend(["--max-turns", "15"])
+                cmd_retry.extend(["--max-turns", str(configured_turns or 30)])
                 if mcp_config_path:
                     cmd_retry.extend(["--mcp-config", mcp_config_path])
                 if self._model_flag:
@@ -279,6 +280,26 @@ class ClaudeCodeProvider(ModelProvider):
                 # Also persist to workspace for cross-session continuation
                 if cwd:
                     self.save_sessions_to_workspace(cwd)
+
+            # Output validation: if response is suspiciously short and we have
+            # a session, resume once to let the agent complete its deliverable.
+            response_text = raw_response.get("result", "")
+            resume_sid = new_session_id or (self.get_session(node_id) if node_id else None)
+            if (
+                resume_sid
+                and len(response_text) < 1000
+                and not raw_response.get("error")
+                and not is_continuation  # avoid infinite resume loops
+            ):
+                raw_response, stderr_text = self._resume_for_completion(
+                    client, resume_sid, cwd, timeout, stream_callback,
+                    mcp_config_path,
+                )
+                self._track_token_usage(raw_response)
+                # Update session if a new one was returned
+                updated_sid = raw_response.get("session_id")
+                if updated_sid and node_id:
+                    self.set_session(node_id, updated_sid)
 
             return self._build_stream_response(raw_response, stderr_text)
         finally:
@@ -433,6 +454,43 @@ class ClaudeCodeProvider(ModelProvider):
             "type": "result",
         }
 
+    def _resume_for_completion(
+        self,
+        client: str,
+        session_id: str,
+        cwd: Optional[str],
+        timeout: int,
+        stream_callback: Optional[Any],
+        mcp_config_path: Optional[str],
+    ) -> tuple:
+        """Resume session to ask agent to complete its deliverable.
+
+        Called when output validation detects a suspiciously short response,
+        indicating the agent likely ran out of turns before writing its
+        deliverable.
+        """
+        completion_prompt = (
+            "Your previous response was incomplete — you ran out of turns before "
+            "writing your deliverable. Please write your COMPLETE deliverable now. "
+            "Do NOT do any more research or tool calls. Use the knowledge you already "
+            "gathered to produce your full output document immediately."
+        )
+        configured_turns = getattr(self.config, "max_turns", None)
+        cmd = [
+            client, "-p", completion_prompt,
+            "--output-format", "stream-json",
+            "--verbose",
+            "--dangerously-skip-permissions",
+            "--resume", session_id,
+            "--max-turns", str(configured_turns or 20),
+        ]
+        if mcp_config_path:
+            cmd.extend(["--mcp-config", mcp_config_path])
+        if self._model_flag:
+            cmd.extend(["--model", self._model_flag])
+
+        return self._run_streaming(cmd, cwd, timeout, stream_callback)
+
     def _build_stream_response(
         self, raw_response: dict, stderr_text: str,
     ) -> ModelResponse:
@@ -558,6 +616,22 @@ class ClaudeCodeProvider(ModelProvider):
                 "implementation, after writing key files, before/after running tests). "
                 "Keep reports concise (1-2 sentences). Do NOT over-report — 2-5 calls "
                 "per session is ideal. If reporting fails, continue your work normally."
+            )
+
+        if not is_continuation:
+            parts.append(
+                "[Turn Budget & Output Priority]:\n"
+                "You have a LIMITED number of agentic turns. Your PRIMARY deliverable "
+                "(document, code, report) is MORE important than exhaustive research.\n"
+                "- Spend at most 60% of your effort on research and analysis\n"
+                "- Reserve at least 40% for writing your final deliverable output\n"
+                "- If you have gathered enough context, STOP researching and START writing\n"
+                "- Do NOT end your response with 'I will now...' or 'Let me next...' — "
+                "always produce a complete deliverable before your turns run out\n"
+                "- Limit sequential thinking (mcp sequentialthinking) to maximum 5 steps — "
+                "consolidate your analysis into fewer, deeper steps rather than many shallow ones\n"
+                "- If you must choose between perfect research and a complete deliverable, "
+                "ALWAYS choose the complete deliverable"
             )
 
         return "\n\n".join(parts)
@@ -920,6 +994,7 @@ class ClaudeCodeProvider(ModelProvider):
         ".DS_Store",
         "Thumbs.db",
         "desktop.ini",
+        ".claude_sessions.json",
     })
 
     def _snapshot_workspace(self, workspace_root: str) -> Dict[str, tuple]:

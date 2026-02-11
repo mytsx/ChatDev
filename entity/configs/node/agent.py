@@ -334,6 +334,7 @@ class AgentConfig(BaseConfig):
     # Claude Code persistent session support
     persistent_session: bool = True  # Keep session alive across calls (claude-code only)
     skip_memory: bool = False  # Skip ChatDev memory system (claude-code manages its own)
+    max_turns: int | None = None  # Max agentic turns for Claude Code CLI (overrides provider default)
 
     # Runtime attributes (attached dynamically)
     token_tracker: Any | None = field(default=None, init=False, repr=False)
@@ -401,6 +402,12 @@ class AgentConfig(BaseConfig):
         if skip_memory is None:
             skip_memory = False
 
+        # Max turns configuration (Claude Code CLI --max-turns)
+        max_turns_raw = mapping.get("max_turns")
+        max_turns = None
+        if max_turns_raw is not None:
+            max_turns = _coerce_positive_int(max_turns_raw, field_path=extend_path(path, "max_turns"), minimum=1)
+
         return cls(
             provider=provider,
             base_url=base_url,
@@ -415,6 +422,7 @@ class AgentConfig(BaseConfig):
             input_mode=input_mode,
             persistent_session=persistent_session,
             skip_memory=skip_memory,
+            max_turns=max_turns,
             path=path,
         )
 
@@ -531,6 +539,14 @@ class AgentConfig(BaseConfig):
             required=False,
             default=False,
             description="Skip ChatDev memory system when using claude-code provider (Claude manages its own context)",
+            advance=True,
+        ),
+        "max_turns": ConfigFieldSpec(
+            name="max_turns",
+            display_name="Max Turns",
+            type_hint="int",
+            required=False,
+            description="Maximum agentic turns for Claude Code CLI (overrides provider default of 30)",
             advance=True,
         ),
     }
