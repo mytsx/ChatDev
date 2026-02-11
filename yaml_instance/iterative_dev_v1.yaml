@@ -37,6 +37,11 @@ graph:
           You are a Requirements Analyst and Software Architect.
           Analyze the user's project request and produce a clear, structured specification.
 
+          You have access to:
+          - Sequential Thinking tool: use it to break down complex requirements step by step
+          - Web Fetch tool: use it to look up API docs, library references, or technical specs when needed
+          - File reading tools: use them to analyze existing codebase if one exists
+
           OUTPUT FORMAT:
           ## Project Overview
           [1-2 sentence summary]
@@ -65,6 +70,14 @@ graph:
                 - name: read_file_segment
                 - name: search_in_files
                 - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@anthropic-ai/mcp-server-fetch"]
 
     # ── Phase 02: Task Planning ─────────────────────────────────────
     - id: Task Planner
@@ -78,6 +91,9 @@ graph:
         role: |
           You are a Technical Project Planner.
           Based on the requirements specification, create a detailed, ordered task plan.
+
+          You have access to:
+          - Sequential Thinking tool: use it to reason through task dependencies and ordering
 
           OUTPUT FORMAT:
           ## Implementation Plan
@@ -111,6 +127,10 @@ graph:
                 - name: read_file_segment
                 - name: search_in_files
                 - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 
     # ── Phase 03: Plan Approval (Human) ─────────────────────────────
     - id: Plan Approval
@@ -154,6 +174,10 @@ graph:
         role: |
           You are a QA Engineer. Run comprehensive integration tests on the complete project.
 
+          You have access to:
+          - Context7 tool: use it to look up testing patterns, framework-specific test APIs, and library docs
+          - File reading and code execution tools
+
           PROCESS:
           1. Read all source code files to understand the full project
           2. Run the test suite if one exists (using uv_run with timeout)
@@ -177,6 +201,11 @@ graph:
                 - name: read_file_segment
                 - name: search_in_files
                 - name: list_directory
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp"]
 
     - id: Integration Fix Counter
       type: loop_counter
@@ -198,6 +227,10 @@ graph:
         role: |
           You are an Integration Bug Fixer. Fix the integration issues reported by the QA engineer.
 
+          You have access to:
+          - Sequential Thinking tool: use it to analyze complex multi-file integration issues step by step
+          - Context7 tool: use it to look up correct API usage, library docs, and framework patterns
+
           RULES:
           - Fix ONLY the reported integration issues
           - Make minimal, targeted changes
@@ -218,6 +251,15 @@ graph:
                 - name: search_in_files
                 - name: save_file
                 - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp"]
 
     # ── Phase 09: Final Review (Human) ──────────────────────────────
     - id: Final Review
@@ -244,6 +286,9 @@ graph:
         role: |
           You are a Technical Writer. Generate comprehensive project documentation.
 
+          You have access to:
+          - Web Fetch tool: use it to look up documentation standards or reference docs if needed
+
           PROCESS:
           1. Read all source code files
           2. Create a README.md with:
@@ -264,6 +309,10 @@ graph:
                 - name: search_in_files
                 - name: save_file
                 - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@anthropic-ai/mcp-server-fetch"]
 
     - id: Delivery Summary
       type: agent

@@ -30,12 +30,19 @@ graph:
         role: |
           You are a Senior Software Developer. You receive task specifications and implement them fully.
 
+          You have access to:
+          - Sequential Thinking tool: use it to plan complex implementations before coding
+          - Context7 tool: use it to look up library/framework documentation (API references, usage examples, best practices)
+          - Web Fetch tool: use it to look up technical references when needed
+          - File and code execution tools for reading, writing, and running code
+
           PROCESS:
           1. Read existing code files to understand the current codebase state
-          2. Plan your implementation approach
-          3. Implement the required changes step by step
-          4. Ensure code is complete, functional, and follows project conventions
-          5. Save all modified files
+          2. Use Sequential Thinking to plan your implementation approach for complex tasks
+          3. Use Context7 to look up correct API usage for libraries you're working with
+          4. Implement the required changes step by step
+          5. Ensure code is complete, functional, and follows project conventions
+          6. Save all modified files
 
           RULES:
           - Write clean, well-structured code with proper error handling
@@ -57,6 +64,19 @@ graph:
                 - name: search_in_files
                 - name: save_file
                 - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp"]
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@anthropic-ai/mcp-server-fetch"]
 
     - id: Code Reviewer
       type: agent
@@ -69,6 +89,10 @@ graph:
         role: |
           You are a Code Reviewer. Examine the developer's code changes thoroughly.
 
+          You have access to:
+          - Sequential Thinking tool: use it to systematically work through your review checklist
+          - Context7 tool: use it to verify correct library/framework API usage in the code
+
           CHECK LIST:
           1. Correctness — does the code implement the requirements?
           2. Code quality — clean, readable, maintainable?
@@ -76,6 +100,7 @@ graph:
           4. All methods fully implemented (no stubs/placeholders)?
           5. Proper error handling?
           6. Project conventions followed?
+          7. Correct library/API usage? (verify with Context7 if unsure)
 
           You MUST call the provided functions to read and inspect the source code.
 
@@ -90,6 +115,15 @@ graph:
                 - name: read_file_segment
                 - name: search_in_files
                 - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp"]
 
     - id: Review Loop Counter
       type: loop_counter
@@ -146,6 +180,10 @@ graph:
         role: |
           You are a Bug Fixer. Fix the specific bugs reported by the tester.
 
+          You have access to:
+          - Sequential Thinking tool: use it to analyze the root cause of bugs step by step
+          - Context7 tool: use it to look up correct API usage if the bug is related to library misuse
+
           RULES:
           - Fix ONLY the reported bugs — do NOT rewrite or refactor unrelated code
           - Make minimal, targeted changes
@@ -166,6 +204,15 @@ graph:
                 - name: search_in_files
                 - name: save_file
                 - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp"]
 
     - id: Test Loop Counter
       type: loop_counter
