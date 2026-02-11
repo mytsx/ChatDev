@@ -221,7 +221,7 @@ graph:
       context_window: 0
       config:
         provider: claude-code
-        name: sonnet
+        name: opus
         skip_memory: true
         role: |
           You are a Solution Architect. Your goal is to design a concise, usable, complete software system that the development team can implement without ambiguity.
@@ -1039,7 +1039,7 @@ graph:
       context_window: -1
       config:
         provider: claude-code
-        name: sonnet
+        name: opus
         skip_memory: true
         role: |
           You are a Senior Code Reviewer. Your goal is to ensure the codebase follows clean code principles, established design patterns, and is maintainable by a team.
@@ -1509,7 +1509,7 @@ graph:
       context_window: -1
       config:
         provider: claude-code
-        name: sonnet
+        name: opus
         skip_memory: true
         role: |
           You are a Security Auditor performing a code-level security assessment. Adopt an adversarial mindset: you are a skilled attacker with full source code access, looking for exploitable vulnerabilities.
@@ -2132,7 +2132,7 @@ graph:
       context_window: 0
       config:
         provider: claude-code
-        name: sonnet
+        name: haiku
         skip_memory: true
         role: |
           You are the Delivery Manager. Your goal is to produce a concise, factual delivery summary that traces every original requirement to its implementation status.
