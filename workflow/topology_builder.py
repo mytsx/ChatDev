@@ -72,8 +72,11 @@ class GraphTopologyBuilder:
                 super_nodes[super_node_id] = set()
                 node_to_super[node_id] = super_node_id
 
-        # Build dependencies between super-nodes
+        # Build dependencies between super-nodes (only trigger:true edges create dependencies)
         for edge_config in edges:
+            if not edge_config.get("trigger", True):
+                continue
+
             from_node = edge_config["from"]
             to_node = edge_config["to"]
 

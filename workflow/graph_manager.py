@@ -159,7 +159,8 @@ class GraphManager:
                 "dynamic_config": dynamic_config,
             }
             self.graph.nodes[src].add_successor(self.graph.nodes[dst], payload)
-            self.graph.nodes[dst].add_predecessor(self.graph.nodes[src])
+            if edge_config.trigger:
+                self.graph.nodes[dst].add_predecessor(self.graph.nodes[src])
             self.graph.edges.append({
                 "from": src,
                 "to": dst,

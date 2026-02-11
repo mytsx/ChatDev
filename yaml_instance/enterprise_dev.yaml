@@ -10,7 +10,6 @@ graph:
 
   start:
     - USER
-    - Business Analyst
   end:
     - Delivery Manager
 
@@ -328,7 +327,7 @@ graph:
 
           Adopt an adversarial mindset: assume an attacker with unlimited time, technical skill, and motivation is targeting this system.
 
-          Your output goes to → DBA (who will design the database with your security requirements in mind).
+          Your output goes to → Tech Lead (as context for task planning — DBA runs in parallel with you).
 
           AVAILABLE TOOLS:
           - Sequential Thinking: systematically evaluate each attack surface
@@ -431,7 +430,8 @@ graph:
           3. Define primary keys, foreign keys, unique constraints, and check constraints
           4. Design indexes based on expected query patterns from the API contracts
           5. Plan migration strategy with rollback capability
-          6. Consider security requirements from the Security Reviewer's output
+          6. Apply database security best practices (encryption at rest, PII handling, audit trails).
+             A Security Reviewer runs in parallel — the Tech Lead integrates all security requirements.
           7. If existing codebase present, read current schema and plan incremental changes
 
           OUTPUT FORMAT:
@@ -524,22 +524,41 @@ graph:
           7. Flag any risks or ambiguities found across the upstream documents
 
           OUTPUT FORMAT:
+
+          IMPORTANT: Structure tasks into separate sections by role for parallel execution.
+          Each section will be processed by a separate developer instance.
+
           ## Dependency Analysis
           [Which components depend on which — identify the critical path]
 
-          ## Implementation Plan
-
-          ### Task 1: [Title] — Assigned: [Backend/Frontend/Integration] — Size: [S/M/L]
-          **What**: [Specific deliverable — files to create/modify]
+          ## BACKEND TASKS
+          ### Backend Task 1: [Title] — Size: [S/M/L]
+          **What**: [Specific deliverable]
           **Why**: [Which requirement this fulfills — reference FR-N or SEC-N]
-          **Depends on**: [Task N or "None"]
-          **Acceptance**: [How the QA Engineer will verify this is done]
-          **Files**: [Exact file paths to create or modify]
+          **Depends on**: [Backend Task N or "None"]
+          **Files**: [Exact file paths to create/modify]
+          **Acceptance**: [How to verify]
 
-          ### Task 2: ...
+          ### Backend Task 2: ...
+
+          ## FRONTEND TASKS
+          ### Frontend Task 1: [Title] — Size: [S/M/L]
+          **What**: [Specific deliverable]
+          **Why**: [Which requirement this fulfills — reference FR-N or SEC-N]
+          **Depends on**: [Frontend Task N or "None"]
+          **Files**: [Exact file paths to create/modify]
+          **Acceptance**: [How to verify]
+
+          ### Frontend Task 2: ...
+
+          ## INTEGRATION TASKS
+          ### Integration Task 1: [Title] — Size: [S/M/L]
+          **What**: [Specific deliverable]
+          **Files**: [Exact file paths to create/modify]
+          **Acceptance**: [How to verify]
 
           ## Execution Order
-          Task 1 → Task 2 → [Task 3 | Task 4 (parallel)] → Task 5 → ...
+          [Backend Task 1..N] | [Frontend Task 1..M] (parallel) → Integration Tasks (sequential)
 
           ## Risk Register
           | Risk | Impact | Mitigation | Owner |
@@ -605,7 +624,9 @@ graph:
           You are a Senior Backend Developer. Your goal is to write elegant, readable, extensible, efficient backend code that strictly follows the architecture and task plan.
 
           You receive: Solution Architect's architecture (API contracts, tech stack) + Tech Lead's task plan.
-          Your output goes to → Frontend Developer (who will implement the UI against your APIs).
+          Your output goes to → Integration Engineer (who will verify end-to-end connectivity).
+
+          NOTE: You may receive a single backend task (one of several). Focus exclusively on implementing that specific task. Other tasks are handled by parallel developer instances. Do not modify files outside your task scope.
 
           AVAILABLE TOOLS:
           - Sequential Thinking: plan complex implementations before writing code
@@ -686,8 +707,10 @@ graph:
         role: |
           You are a Senior Frontend Developer. Your goal is to write clean, component-based, accessible frontend code that implements the UX specs and connects to the backend APIs.
 
-          You receive: Solution Architect's architecture + Tech Lead's task plan + Backend Developer's implemented API summary.
+          You receive: Solution Architect's architecture + Tech Lead's task plan + Backend Developer's output (context).
           Your output goes to → Integration Engineer (who will verify end-to-end connectivity).
+
+          NOTE: You may receive a single frontend task (one of several). Focus exclusively on implementing that specific task. Other tasks are handled by parallel developer instances. Do not modify files outside your task scope.
 
           AVAILABLE TOOLS:
           - Sequential Thinking: plan component architecture and state management before coding
@@ -1021,7 +1044,7 @@ graph:
         role: |
           You are a Software Development Engineer in Test (SDET). Your goal is to write comprehensive, CI-ready automated tests that prevent regressions and validate all critical paths.
 
-          Your output goes to → Security Auditor (who will scan the code for vulnerabilities).
+          Your output goes to → DevOps Engineer and SRE (who will set up deployment and monitoring).
 
           AVAILABLE TOOLS:
           - Sequential Thinking: design test strategy and prioritize coverage
@@ -1270,7 +1293,7 @@ graph:
         role: |
           You are a DevOps Engineer. Your goal is to make deployments boring — safe, automatic, and repeatable with every commit.
 
-          Your output goes to → SRE (who will add monitoring and observability).
+          Your output goes to → Final Review (SRE runs in parallel with you).
 
           AVAILABLE TOOLS:
           - Sequential Thinking: plan deployment pipeline stages and dependencies
@@ -1450,6 +1473,63 @@ graph:
         reset_on_emit: true
         message: Maximum final revisions reached. Proceeding to documentation.
 
+    - id: Final Bug Fixer
+      type: agent
+      description: "Fixes issues from final review feedback."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Bug Fixer handling final review feedback. Your goal is to fix the specific issues reported by the reviewer with minimal, targeted changes.
+
+          Your output goes to → Final Review (who will re-review after your fixes).
+
+          PROCESS:
+          1. Read the reviewer's feedback carefully — understand each issue
+          2. Read the relevant source files
+          3. Apply minimal fixes for each reported issue
+          4. Verify fixes don't break related functionality
+          5. Save all modified files
+
+          CRITICAL RULES:
+          - Fix ONLY the reported issues — do NOT refactor or "improve" unrelated code
+          - Make the SMALLEST possible change that fixes the issue
+          - Save all fixed files
+
+          OUTPUT: For each fix, report:
+          - Issue: [what was reported]
+          - Root cause: [why it happened]
+          - Fix: [what you changed, file:line]
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+
     - id: Technical Writer
       type: agent
       description: "Phase 09a — Generates project documentation."
@@ -1610,13 +1690,12 @@ graph:
   # EDGES
   # ════════════════════════════════════════════════════════════════════
   edges:
-    # ─── USER context propagation (keep_message, no trigger) ───
+    # ─── USER triggers parallel: BA + UX Designer (Layer 1) ───
     - from: USER
       to: Business Analyst
-      trigger: false
+      trigger: true
       condition: 'true'
       carry_data: true
-      keep_message: true
     - from: USER
       to: Tech Lead
       trigger: false
@@ -1669,12 +1748,32 @@ graph:
       condition: 'true'
       carry_data: true
       keep_message: true
+      dynamic:
+        type: map
+        split:
+          type: regex
+          config:
+            pattern: "### Backend Task \\d+:.*?(?=### Backend Task \\d+:|## FRONTEND|## INTEGRATION|$)"
+            dotall: true
+            on_no_match: pass
+        config:
+          max_parallel: 5
     - from: Tech Lead
       to: Frontend Developer
       trigger: false
       condition: 'true'
       carry_data: true
       keep_message: true
+      dynamic:
+        type: map
+        split:
+          type: regex
+          config:
+            pattern: "### Frontend Task \\d+:.*?(?=### Frontend Task \\d+:|## INTEGRATION|$)"
+            dotall: true
+            on_no_match: pass
+        config:
+          max_parallel: 5
     - from: Tech Lead
       to: Integration Engineer
       trigger: false
@@ -1690,9 +1789,22 @@ graph:
       carry_data: true
       keep_message: true
 
-    # ═══ Phase 1: Discovery ═══
+    # ═══ Phase 1: Discovery (Parallel Layer 1: BA + UX Designer) ═══
+    - from: USER
+      to: UX Designer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+
     - from: Business Analyst
       to: UX Designer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    - from: Business Analyst
+      to: Solution Architect
       trigger: true
       condition: 'true'
       carry_data: true
@@ -1703,18 +1815,25 @@ graph:
       condition: 'true'
       carry_data: true
 
-    # ═══ Phase 2: Architecture ═══
+    # ═══ Phase 2: Architecture (Parallel Layer 2: Security Reviewer + DBA) ═══
     - from: Solution Architect
       to: Security Reviewer
       trigger: true
       condition: 'true'
       carry_data: true
 
-    - from: Security Reviewer
+    - from: Solution Architect
       to: DBA
       trigger: true
       condition: 'true'
       carry_data: true
+
+    - from: Security Reviewer
+      to: Tech Lead
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
 
     # ═══ Phase 3: Planning ═══
     - from: DBA
@@ -1729,9 +1848,21 @@ graph:
       condition: 'true'
       carry_data: true
 
-    # Approval → proceed to development
+    # Approval → proceed to development (parallel: Backend + Frontend)
     - from: Plan Approval
       to: Backend Developer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [approve, onay, tamam]
+          none: []
+          regex: []
+          case_sensitive: false
+      carry_data: true
+
+    - from: Plan Approval
+      to: Frontend Developer
       trigger: true
       condition:
         type: keyword
@@ -1768,7 +1899,7 @@ graph:
           case_sensitive: true
       carry_data: true
 
-    # Revision counter → proceed to dev (exhausted)
+    # Revision counter → proceed to dev (exhausted, parallel: Backend + Frontend)
     - from: Plan Revision Counter
       to: Backend Developer
       trigger: true
@@ -1781,9 +1912,28 @@ graph:
           case_sensitive: true
       carry_data: true
 
-    # ═══ Phase 4: Development (sequential) ═══
+    - from: Plan Revision Counter
+      to: Frontend Developer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # ═══ Phase 4: Development (Parallel Layer 3: Backend + Frontend) ═══
     - from: Backend Developer
       to: Frontend Developer
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    - from: Backend Developer
+      to: Integration Engineer
       trigger: true
       condition: 'true'
       carry_data: true
@@ -1794,9 +1944,16 @@ graph:
       condition: 'true'
       carry_data: true
 
-    # ═══ Phase 5: Quality Assurance ═══
+    # ═══ Phase 5: Quality Assurance (Parallel Layer 4: QA + Security) ═══
     - from: Integration Engineer
       to: QA Engineer
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    - from: Integration Engineer
+      to: Security Auditor
       trigger: true
       condition: 'true'
       carry_data: true
@@ -1864,17 +2021,38 @@ graph:
       carry_data: true
       clear_context: true
 
-    # ═══ Phase 6: Security Audit ═══
+    # ═══ Phase 5b: SDET → parallel DevOps + SRE (Layer 5 trigger) ═══
     - from: SDET
-      to: Security Auditor
+      to: DevOps Engineer
       trigger: true
       condition: 'true'
       carry_data: true
       clear_context: true
 
-    # Security PASS → DevOps
+    - from: SDET
+      to: SRE
+      trigger: true
+      condition: 'true'
+      carry_data: true
+      clear_context: true
+
+    # ═══ Phase 6: Security Audit (Parallel Layer 4: QA + Security) ═══
+    # Security PASS → DevOps + SRE (parallel Layer 5)
     - from: Security Auditor
       to: DevOps Engineer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [SEC_PASS]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    - from: Security Auditor
+      to: SRE
       trigger: true
       condition:
         type: keyword
@@ -1912,9 +2090,22 @@ graph:
           case_sensitive: true
       carry_data: true
 
-    # Security Fix Counter → DevOps (exhausted)
+    # Security Fix Counter → DevOps + SRE (exhausted, parallel Layer 5)
     - from: Security Fix Counter
       to: DevOps Engineer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    - from: Security Fix Counter
+      to: SRE
       trigger: true
       condition:
         type: keyword
@@ -1934,9 +2125,16 @@ graph:
       carry_data: true
       clear_context: true
 
-    # ═══ Phase 7: Operations ═══
+    # ═══ Phase 7: Operations (Parallel Layer 5: DevOps + SRE) ═══
     - from: DevOps Engineer
       to: SRE
+      trigger: false
+      condition: 'true'
+      carry_data: true
+      keep_message: true
+
+    - from: DevOps Engineer
+      to: Final Review
       trigger: true
       condition: 'true'
       carry_data: true
@@ -1974,9 +2172,9 @@ graph:
           case_sensitive: false
       carry_data: true
 
-    # Final Revision Counter → QA Bug Fixer (not exhausted)
+    # Final Revision Counter → Final Bug Fixer (not exhausted)
     - from: Final Revision Counter
-      to: QA Bug Fixer
+      to: Final Bug Fixer
       trigger: true
       condition:
         type: keyword
@@ -1985,6 +2183,12 @@ graph:
           none: [LOOP_EXIT]
           regex: []
           case_sensitive: true
+      carry_data: true
+
+    - from: Final Bug Fixer
+      to: Final Review
+      trigger: true
+      condition: 'true'
       carry_data: true
 
     # Final Revision Counter → Technical Writer (exhausted)

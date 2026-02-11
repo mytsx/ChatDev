@@ -106,10 +106,12 @@ class CycleDetector:
         if not node:
             return
         
-        # Consider successors of node
+        # Consider successors of node (only trigger:true edges form real execution cycles)
         for edge_link in node.iter_outgoing_edges():
+            if not edge_link.trigger:
+                continue
             successor_id = edge_link.target.id
-            
+
             if successor_id not in self.index:
                 self._strong_connect(successor_id, nodes)
                 self.low_link[node_id] = min(self.low_link[node_id], self.low_link[successor_id])
