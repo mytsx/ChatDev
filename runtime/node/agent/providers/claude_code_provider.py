@@ -163,7 +163,7 @@ class ClaudeCodeProvider(ModelProvider):
         mcp_config_path = self._create_mcp_config(
             node_id or "", session_id, server_port,
             tooling_configs=tooling_configs,
-        ) if session_id else None
+        )
 
         # Build prompt (simplified for continuations)
         prompt = self._build_prompt(
@@ -642,13 +642,13 @@ class ClaudeCodeProvider(ModelProvider):
         try:
             servers: Dict[str, Any] = {}
 
-            # --- built-in chatdev-reporter ---
+            # --- built-in chatdev-reporter (requires session_id) ---
             mcp_server_path = str(
                 Path(__file__).resolve().parents[4]
                 / "mcp_servers"
                 / "chatdev_reporter.py"
             )
-            if Path(mcp_server_path).exists():
+            if session_id and Path(mcp_server_path).exists():
                 servers["chatdev-reporter"] = {
                     "command": "python",
                     "args": [mcp_server_path],
@@ -710,6 +710,11 @@ class ClaudeCodeProvider(ModelProvider):
     @staticmethod
     def _infer_mcp_server_name(command: str, args: List[str]) -> str:
         """Derive a short MCP server name from its launch command.
+
+        Uses the last non-flag positional arg as the package/script name.
+        For commands with trailing path args (e.g. ``npx -y server-filesystem
+        /workspace``), set ``prefix`` on the ToolingConfig to avoid misleading
+        names.
 
         Examples:
             npx -y @modelcontextprotocol/server-fetch  → server-fetch
