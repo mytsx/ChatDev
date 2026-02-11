@@ -5,7 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Union
 
-from check.check import load_config
 from entity.enums import LogLevel
 from entity.graph_config import GraphConfig
 from entity.messages import Message
@@ -94,6 +93,8 @@ def run_workflow(
             "Task prompt cannot be empty",
             details={"task_prompt_provided": bool(task_prompt)},
         )
+
+    from check.check import load_config
 
     design = load_config(yaml_path, fn_module=fn_module, vars_override=variables)
     normalized_session = _normalize_session_name(yaml_path, session_name)
