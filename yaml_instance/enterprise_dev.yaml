@@ -3,8 +3,8 @@ version: 0.4.0
 graph:
   id: enterprise_dev
   description: >
-    Enterprise software development workflow with 26 nodes (18 agents, 2 human gates, 4 loop counters, 1 passthrough, 1 bug fixer).
-    Discovery → Architecture → Planning → Development → QA → Security → Operations → Delivery.
+    Enterprise software development workflow with 29 nodes (21 agents, 2 human gates, 5 loop counters, 1 passthrough).
+    Discovery → Architecture → Planning → Development → Code Review → QA → Security → Operations → Delivery.
   log_level: INFO
   is_majority_voting: false
 
@@ -1031,6 +1031,193 @@ graph:
               args: ["-y", "@gscalzo/stackoverflow-mcp"]
 
     # ══════════════════════════════════════════════════════════════════
+    # Phase 4b: Code Review
+    # ══════════════════════════════════════════════════════════════════
+    - id: Code Reviewer
+      type: agent
+      description: "Phase 04d — Reviews code quality, design principles, and maintainability."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Senior Code Reviewer. Your goal is to ensure the codebase follows clean code principles, established design patterns, and is maintainable by a team.
+
+          You receive: All implemented code from Backend Developer, Frontend Developer, and Integration Engineer.
+          Your output goes to → QA Engineer + Security Auditor (who run in parallel after you).
+
+          AVAILABLE TOOLS:
+          - Sequential Thinking: reason through design trade-offs and pattern decisions
+          - Context7: look up framework-specific coding conventions and best practices
+          - Filesystem: explore the full codebase with directory_tree and search_files
+          - Stack Overflow: search for design pattern discussions, anti-pattern examples
+
+          REVIEW DIMENSIONS:
+
+          1. SOLID PRINCIPLES:
+             - Single Responsibility: Does each function/class have ONE reason to change?
+             - Open/Closed: Can behavior be extended without modifying existing code?
+             - Liskov Substitution: Can derived classes replace base classes without issues?
+             - Interface Segregation: Are interfaces focused (not bloated)?
+             - Dependency Inversion: Do high-level modules depend on abstractions?
+
+          2. CODE QUALITY:
+             - DRY: Is there duplicated logic that should be extracted?
+             - KISS: Is any code unnecessarily complex?
+             - YAGNI: Is there speculative code that isn't needed yet?
+             - Naming: Are variables, functions, and classes descriptively named?
+             - Complexity: Any function > 50 lines or > 3 nesting levels?
+             - No dead code (unused imports, unreachable branches, commented-out code)
+             - No hardcoded magic numbers — use named constants
+             - Error handling is specific (not bare except/catch-all)
+             - Max cyclomatic complexity per function: 10
+
+          3. DESIGN PATTERNS:
+             - Is business logic separated from API handlers (service layer)?
+             - Is data access abstracted (repository pattern or consistent ORM usage)?
+             - Are dependencies injectable (not hardcoded imports of implementations)?
+             - Is error handling consistent across the codebase?
+             - Configuration from environment variables, not hardcoded values
+
+          4. MAINTAINABILITY:
+             - Can a new developer understand each file's purpose in < 5 minutes?
+             - Are there magic numbers or strings that should be named constants?
+             - Is the code consistent in style, naming, and patterns throughout?
+             - Are there any dead code paths (unreachable code, unused imports)?
+             - No TODO/FIXME/HACK comments left in production code
+
+          PROCESS:
+          1. Read ALL source files systematically
+          2. For each file, evaluate against the 4 dimensions above
+          3. Categorize findings by severity:
+             - P1 (Must Fix): SOLID violations, major DRY violations, architectural inconsistency
+             - P2 (Should Fix): Naming issues, complexity, minor DRY violations
+             - P3 (Consider): Style suggestions, minor improvements
+          4. Provide specific, actionable feedback with code examples
+
+          DECISION (your last line MUST contain one of these):
+          - Clean: "REVIEW_PASS: [summary of quality assessment]"
+          - Issues: "REVIEW_FAIL: [P1/P2 findings with file:line references]"
+
+          CONSTRAINTS:
+          - Be constructive — explain WHY a pattern is better, not just "change this"
+          - Focus on patterns, not preferences (tabs vs spaces is NOT a review item)
+          - A P1 finding must explain the concrete harm (not theoretical)
+          - Only P1 findings trigger REVIEW_FAIL — P2/P3 are informational only
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: describe_available_files
+                - name: read_file_segment
+                - name: search_in_files
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
+
+    - id: Code Review Fix Counter
+      type: loop_counter
+      description: Limits code review fix iterations to 3.
+      context_window: 0
+      config:
+        max_iterations: 3
+        reset_on_emit: true
+        message: Maximum code review fix iterations reached. Proceeding to QA and Security.
+
+    - id: Code Review Bug Fixer
+      type: agent
+      description: "Fixes code quality issues found by Code Reviewer."
+      context_window: -1
+      config:
+        provider: claude-code
+        name: sonnet
+        skip_memory: true
+        role: |
+          You are a Code Quality Fixer. Your goal is to fix the code quality issues reported by the Code Reviewer with minimal, targeted changes.
+
+          Your output goes to → Code Reviewer (who will re-review after your fixes).
+
+          AVAILABLE TOOLS:
+          - Sequential Thinking: analyze the design issue before refactoring
+          - Context7: look up correct patterns for the framework in use
+          - Filesystem: locate and read files that need changes
+          - Stack Overflow: search for design pattern implementations and refactoring techniques
+
+          PROCESS:
+          1. Read the Code Reviewer's report carefully — understand each P1/P2 finding
+          2. For each P1 finding (Must Fix):
+             a. Read the relevant source file(s)
+             b. Understand the current design and why it violates the principle
+             c. Plan the minimal refactoring to fix it
+             d. Apply the fix
+             e. Verify the fix doesn't break existing functionality
+          3. For P2 findings: fix if the change is safe and minimal, otherwise note as deferred
+          4. Save all modified files
+
+          CRITICAL RULES:
+          - Fix ONLY the reported findings — do NOT over-refactor or "gold plate"
+          - Make the SMALLEST possible change that addresses the principle violation
+          - Preserve all existing functionality — refactoring must not change behavior
+          - If a fix requires changing more than 3 files, use Sequential Thinking to verify the approach
+          - Save all fixed files
+
+          OUTPUT: For each finding fixed, report:
+          - Finding: [what the Code Reviewer reported]
+          - Root cause: [why the code violates the principle]
+          - Fix: [what you changed, file:line]
+          - Regression risk: [none/low/medium]
+        tooling:
+          - type: function
+            config:
+              tools:
+                - name: uv_related:All
+                - name: apply_text_edits
+                - name: create_folder
+                - name: describe_available_files
+                - name: delete_path
+                - name: read_file_segment
+                - name: search_in_files
+                - name: save_file
+                - name: list_directory
+          - type: mcp_local
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          - type: mcp_local
+            prefix: context7
+            config:
+              command: "npx"
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: stackoverflow
+            config:
+              command: "npx"
+              args: ["-y", "@gscalzo/stackoverflow-mcp"]
+
+    # ══════════════════════════════════════════════════════════════════
     # Phase 5: Quality Assurance
     # ══════════════════════════════════════════════════════════════════
     - id: QA Engineer
@@ -1074,24 +1261,6 @@ graph:
           - [ ] No import errors or missing dependencies
           - [ ] No unhandled promise rejections or uncaught exceptions
           - [ ] App starts and runs without crashing
-
-          **E. CODE QUALITY REVIEW**
-          - [ ] Functions follow Single Responsibility — each does one thing
-          - [ ] No copy-pasted code blocks (DRY violations)
-          - [ ] Naming is consistent and descriptive (no `data`, `temp`, `x`, `handler2`)
-          - [ ] No dead code (unused imports, unreachable branches, commented-out code)
-          - [ ] No hardcoded magic numbers — use named constants
-          - [ ] Error handling is specific (not bare except/catch-all)
-          - [ ] No TODO/FIXME/HACK comments left in code
-          - [ ] Code complexity is reasonable (no functions > 50 lines, no deep nesting > 3 levels)
-          - [ ] Max cyclomatic complexity per function: 10
-
-          **F. DESIGN PATTERN VERIFICATION**
-          - [ ] Business logic is NOT in API route handlers (should be in services/utils)
-          - [ ] Data access uses consistent pattern (all repository, or all ORM, not mixed)
-          - [ ] Dependencies are injected, not hardcoded (testability check)
-          - [ ] Configuration from environment variables, not hardcoded values
-          - [ ] SOLID principles: each class/module has a single, clear responsibility
 
           TEST DESIGN TECHNIQUES (apply at least 2 per feature):
           1. Equivalence Partitioning: Group inputs into valid/invalid classes, test one from each
@@ -2288,20 +2457,103 @@ graph:
       condition: 'true'
       carry_data: true
 
-    # ═══ Phase 5: Quality Assurance (Parallel Layer 4: QA + Security) ═══
+    # ═══ Phase 4b: Code Review ═══
     - from: Integration Engineer
-      to: QA Engineer
+      to: Code Reviewer
       trigger: true
       condition: 'true'
       carry_data: true
       clear_context: true
 
-    - from: Integration Engineer
+    # Code Review PASS → QA + Security (parallel)
+    - from: Code Reviewer
+      to: QA Engineer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [REVIEW_PASS]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    - from: Code Reviewer
       to: Security Auditor
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [REVIEW_PASS]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # Code Review FAIL → Code Review Fix Counter
+    - from: Code Reviewer
+      to: Code Review Fix Counter
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [REVIEW_PASS]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Code Review Fix Counter → Bug Fixer (not exhausted)
+    - from: Code Review Fix Counter
+      to: Code Review Bug Fixer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: []
+          none: [LOOP_EXIT]
+          regex: []
+          case_sensitive: true
+      carry_data: true
+
+    # Code Review Fix Counter → QA + Security (exhausted, proceed anyway)
+    - from: Code Review Fix Counter
+      to: QA Engineer
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    - from: Code Review Fix Counter
+      to: Security Auditor
+      trigger: true
+      condition:
+        type: keyword
+        config:
+          any: [LOOP_EXIT]
+          none: []
+          regex: []
+          case_sensitive: true
+      carry_data: true
+      clear_context: true
+
+    # Code Review Bug Fixer → back to Code Reviewer
+    - from: Code Review Bug Fixer
+      to: Code Reviewer
       trigger: true
       condition: 'true'
       carry_data: true
       clear_context: true
+
+    # ═══ Phase 5: Quality Assurance (Parallel Layer 4: QA + Security) ═══
 
     # QA PASS → SDET
     - from: QA Engineer
