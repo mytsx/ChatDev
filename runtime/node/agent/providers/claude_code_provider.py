@@ -677,12 +677,16 @@ class ClaudeCodeProvider(ModelProvider):
                             cfg.command, cfg.args,
                         )
 
-                    # Deduplicate names
-                    if server_name in servers or server_name in _seen_counter:
-                        count = _seen_counter.get(server_name, 1) + 1
-                        _seen_counter[server_name] = count
-                        server_name = f"{server_name}-{count}"
-                    _seen_counter[server_name] = 1
+                    # Deduplicate names — loop until truly unique
+                    base_name = server_name
+                    counter = _seen_counter.get(base_name, 0) + 1
+                    _seen_counter[base_name] = counter
+                    if counter > 1:
+                        server_name = f"{base_name}-{counter}"
+                    while server_name in servers:
+                        counter += 1
+                        _seen_counter[base_name] = counter
+                        server_name = f"{base_name}-{counter}"
 
                     entry: Dict[str, Any] = {
                         "command": cfg.command,
@@ -711,23 +715,32 @@ class ClaudeCodeProvider(ModelProvider):
     def _infer_mcp_server_name(command: str, args: List[str]) -> str:
         """Derive a short MCP server name from its launch command.
 
-        Uses the last non-flag positional arg as the package/script name.
-        For commands with trailing path args (e.g. ``npx -y server-filesystem
-        /workspace``), set ``prefix`` on the ToolingConfig to avoid misleading
-        names.
+        Picks the first non-flag, non-path positional arg as the package name.
+        Path-like args (starting with ``/``, ``./``, ``~``, or containing
+        path separators without ``@``) are skipped so that e.g.
+        ``npx -y @org/server-filesystem /workspace`` yields
+        ``server-filesystem`` rather than ``workspace``.
 
         Examples:
-            npx -y @modelcontextprotocol/server-fetch  → server-fetch
-            npx -y mapeg-oracle-db                      → mapeg-oracle-db
-            uvx some-tool                               → some-tool
-            python my_server.py                         → my-server
+            npx -y @modelcontextprotocol/server-fetch       → server-fetch
+            npx -y mapeg-oracle-db                           → mapeg-oracle-db
+            npx -y @org/server-filesystem /workspace         → server-filesystem
+            uvx some-tool                                    → some-tool
+            python my_server.py                              → my-server
         """
-        # Find the last non-flag argument — typically the package / script name
         candidate = ""
         for arg in (args or []):
             if arg.startswith("-"):
                 continue
+            # Skip path-like arguments (filesystem paths, not packages)
+            if arg.startswith(("/", "./", "../", "~")):
+                continue
+            # A bare word with slashes but no @ is likely a path, not a package
+            if "/" in arg and "@" not in arg:
+                continue
             candidate = arg
+            break  # first matching arg is the package name
+
         if candidate:
             name = candidate.rsplit("/", 1)[-1]  # @org/server-foo → server-foo
             name = name.removesuffix(".py").removesuffix(".js")
