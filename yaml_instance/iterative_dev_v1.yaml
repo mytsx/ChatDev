@@ -207,12 +207,12 @@ graph:
             prefix: context7
             config:
               command: "npx"
-              args: ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-7c2abc61-f4d3-48c1-b71b-4710e6f70486"]
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
           - type: mcp_local
             prefix: filesystem
             config:
               command: "npx"
-              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
           - type: mcp_remote
             prefix: deepwiki
             config:
@@ -272,12 +272,12 @@ graph:
             prefix: context7
             config:
               command: "npx"
-              args: ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-7c2abc61-f4d3-48c1-b71b-4710e6f70486"]
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
           - type: mcp_local
             prefix: filesystem
             config:
               command: "npx"
-              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
           - type: mcp_remote
             prefix: deepwiki
             config:
@@ -340,7 +340,7 @@ graph:
             prefix: filesystem
             config:
               command: "npx"
-              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
 
     - id: Delivery Summary
       type: agent

@@ -10,6 +10,7 @@ etc. The provider returns the text result from Claude's work.
 
 import json
 import os
+import re
 import subprocess
 import shutil
 import tempfile
@@ -639,8 +640,11 @@ class ClaudeCodeProvider(ModelProvider):
         Includes the built-in chatdev-reporter server and any ``mcp_local``
         servers declared in the node's YAML tooling section.
 
-        Supports ``${WORKSPACE_ROOT}`` placeholder in MCP ``args`` — resolved
-        at runtime to the agent's current workspace path.
+        Supports ``$ENV{VAR}`` placeholders in MCP ``args``, ``env``, ``cwd``
+        and ``url`` — resolved at runtime from ``os.environ`` plus the special
+        ``WORKSPACE_ROOT`` variable.  If any ``$ENV{VAR}`` remains unresolved,
+        the entire MCP server entry is **skipped** (allows optional servers
+        whose API keys may not be configured).
 
         Returns the path to the temp file, or *None* if creation fails.
         """
@@ -666,6 +670,11 @@ class ClaudeCodeProvider(ModelProvider):
 
             # --- YAML-defined MCP servers (mcp_local + mcp_remote) ---
             if tooling_configs:
+                # Build env map for $ENV{VAR} resolution
+                env_map: Dict[str, str] = dict(os.environ)
+                if workspace_root:
+                    env_map["WORKSPACE_ROOT"] = str(workspace_root)
+
                 _seen_counter: Dict[str, int] = {}
                 for tc in tooling_configs:
                     if tc.type not in ("mcp_local", "mcp_remote"):
@@ -709,7 +718,14 @@ class ClaudeCodeProvider(ModelProvider):
                         }
                         if cfg_r.headers:
                             entry_r["headers"] = dict(cfg_r.headers)
-                        servers[server_name] = entry_r
+
+                        # Resolve $ENV{} in url and headers; skip if unresolved
+                        resolved_r = ClaudeCodeProvider._resolve_env_dict(
+                            entry_r, env_map,
+                        )
+                        if resolved_r is None:
+                            continue
+                        servers[server_name] = resolved_r
                         continue
 
                     # --- mcp_local: stdio-based MCP servers ---
@@ -736,32 +752,22 @@ class ClaudeCodeProvider(ModelProvider):
                         _seen_counter[base_name] = counter
                         server_name = f"{base_name}-{counter}"
 
-                    # Resolve ${WORKSPACE_ROOT} placeholder in args
-                    raw_args = list(cfg.args) if cfg.args else []
-                    if workspace_root:
-                        raw_args = [
-                            a.replace("${WORKSPACE_ROOT}", str(workspace_root))
-                            for a in raw_args
-                        ]
                     entry: Dict[str, Any] = {
                         "command": cfg.command,
-                        "args": raw_args,
+                        "args": list(cfg.args) if cfg.args else [],
                     }
                     if cfg.env:
-                        env = dict(cfg.env)
-                        if workspace_root:
-                            env = {
-                                k: v.replace("${WORKSPACE_ROOT}", str(workspace_root))
-                                for k, v in env.items()
-                            }
-                        entry["env"] = env
+                        entry["env"] = dict(cfg.env)
                     if cfg.cwd:
-                        cwd = cfg.cwd
-                        if workspace_root:
-                            cwd = cwd.replace("${WORKSPACE_ROOT}", str(workspace_root))
-                        entry["cwd"] = cwd
+                        entry["cwd"] = cfg.cwd
 
-                    servers[server_name] = entry
+                    # Resolve $ENV{} placeholders; skip server if unresolved
+                    resolved = ClaudeCodeProvider._resolve_env_dict(
+                        entry, env_map,
+                    )
+                    if resolved is None:
+                        continue
+                    servers[server_name] = resolved
 
             if not servers:
                 return None
@@ -813,6 +819,83 @@ class ClaudeCodeProvider(ModelProvider):
 
         # Fallback to command name itself
         return command.replace("_", "-")
+
+    # Pattern for runtime-resolved environment placeholders: $ENV{VAR_NAME}
+    _ENV_PLACEHOLDER = re.compile(r"\$ENV\{([A-Za-z0-9_]+)\}")
+
+    @staticmethod
+    def _resolve_env_str(value: str, env_map: Dict[str, str]) -> tuple[str, bool]:
+        """Resolve ``$ENV{VAR}`` placeholders in a single string.
+
+        Returns ``(resolved_string, ok)`` where *ok* is ``False`` if any
+        placeholder could not be resolved (missing env var).
+        """
+        ok = True
+
+        def replacer(m: re.Match) -> str:
+            nonlocal ok
+            var_name = m.group(1)
+            val = env_map.get(var_name)
+            if val is None:
+                ok = False
+                return m.group(0)  # leave unresolved
+            return val
+
+        resolved = ClaudeCodeProvider._ENV_PLACEHOLDER.sub(replacer, value)
+        return resolved, ok
+
+    @staticmethod
+    def _resolve_env_dict(
+        entry: Dict[str, Any], env_map: Dict[str, str],
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve ``$ENV{VAR}`` in all string values of an MCP entry dict.
+
+        Walks ``args`` (list), ``env`` (dict values), ``cwd``, ``url``,
+        ``headers`` (dict values).  Returns ``None`` if any placeholder
+        remains unresolved — the caller should skip this server.
+        """
+        all_ok = True
+
+        # args list
+        if "args" in entry and isinstance(entry["args"], list):
+            new_args = []
+            for a in entry["args"]:
+                if isinstance(a, str):
+                    resolved, ok = ClaudeCodeProvider._resolve_env_str(a, env_map)
+                    if not ok:
+                        all_ok = False
+                    new_args.append(resolved)
+                else:
+                    new_args.append(a)
+            entry["args"] = new_args
+
+        # simple string fields
+        for key in ("cwd", "url", "command"):
+            if key in entry and isinstance(entry[key], str):
+                resolved, ok = ClaudeCodeProvider._resolve_env_str(
+                    entry[key], env_map,
+                )
+                if not ok:
+                    all_ok = False
+                entry[key] = resolved
+
+        # dict fields (env, headers)
+        for key in ("env", "headers"):
+            if key in entry and isinstance(entry[key], dict):
+                new_dict = {}
+                for k, v in entry[key].items():
+                    if isinstance(v, str):
+                        resolved, ok = ClaudeCodeProvider._resolve_env_str(
+                            v, env_map,
+                        )
+                        if not ok:
+                            all_ok = False
+                        new_dict[k] = resolved
+                    else:
+                        new_dict[k] = v
+                entry[key] = new_dict
+
+        return entry if all_ok else None
 
     @staticmethod
     def _cleanup_mcp_config(config_path: Optional[str]) -> None:
