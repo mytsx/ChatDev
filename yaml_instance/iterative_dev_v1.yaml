@@ -39,6 +39,7 @@ graph:
 
           You have access to:
           - Sequential Thinking tool: use it to break down complex requirements step by step
+          - Exa Search tool: use it for real-time web search (web_search_exa) to research technologies, find best practices, and validate technical feasibility
           - Web Fetch tool: use it to look up API docs, library references, or technical specs when needed
           - File reading tools: use them to analyze existing codebase if one exists
 
@@ -78,6 +79,10 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@anthropic-ai/mcp-server-fetch"]
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
 
     # ── Phase 02: Task Planning ─────────────────────────────────────
     - id: Task Planner
@@ -242,6 +247,7 @@ graph:
           - Sequential Thinking tool: use it to analyze complex multi-file integration issues step by step
           - Context7 tool: use it to look up correct API usage, library docs, and framework patterns
           - DeepWiki tool: use it to read GitHub repo documentation for troubleshooting integration issues
+          - Exa Search tool: use it for real-time web search (web_search_exa) to find solutions for integration issues and compatibility problems
           - Filesystem tool: use search_files to locate integration issues across files, directory_tree to understand project structure
 
           RULES:
@@ -282,6 +288,10 @@ graph:
             prefix: deepwiki
             config:
               server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
 
     # ── Phase 09: Final Review (Human) ──────────────────────────────
     - id: Final Review

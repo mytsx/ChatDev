@@ -34,6 +34,7 @@ graph:
           - Sequential Thinking tool: use it to plan complex implementations before coding
           - Context7 tool: use it to look up library/framework documentation (API references, usage examples, best practices)
           - DeepWiki tool: use it to read documentation and ask questions about GitHub repositories (e.g. framework internals, library architecture)
+          - Exa Search tool: use it for real-time web search (web_search_exa), finding code examples (get_code_context_exa), and extracting content from URLs (crawling_exa)
           - Web Fetch tool: use it to look up technical references when needed
           - Filesystem tool: use it to search files (search_files), view directory tree (directory_tree), and read multiple files at once (read_multiple_files)
           - File and code execution tools for reading, writing, and running code
@@ -88,6 +89,10 @@ graph:
             prefix: deepwiki
             config:
               server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
 
     - id: Code Reviewer
       type: agent
@@ -214,6 +219,7 @@ graph:
           - Sequential Thinking tool: use it to analyze the root cause of bugs step by step
           - Context7 tool: use it to look up correct API usage if the bug is related to library misuse
           - DeepWiki tool: use it to read GitHub repo documentation for library/framework troubleshooting
+          - Exa Search tool: use it for real-time web search (web_search_exa) to find bug solutions, Stack Overflow answers, and similar issues
           - Filesystem tool: use search_files to locate bug-related files, directory_tree to understand project structure
 
           RULES:
@@ -254,6 +260,10 @@ graph:
             prefix: deepwiki
             config:
               server: "https://mcp.deepwiki.com/mcp"
+          - type: mcp_remote
+            prefix: exa
+            config:
+              server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
 
     - id: Test Loop Counter
       type: loop_counter
