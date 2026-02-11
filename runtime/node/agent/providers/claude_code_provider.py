@@ -163,6 +163,7 @@ class ClaudeCodeProvider(ModelProvider):
         mcp_config_path = self._create_mcp_config(
             node_id or "", session_id, server_port,
             tooling_configs=tooling_configs,
+            workspace_root=workspace_root,
         )
 
         # Build prompt (simplified for continuations)
@@ -631,11 +632,15 @@ class ClaudeCodeProvider(ModelProvider):
         server_port: int,
         *,
         tooling_configs: Optional[List[ToolingConfig]] = None,
+        workspace_root: Optional[str] = None,
     ) -> Optional[str]:
         """Create a temporary MCP config JSON file.
 
         Includes the built-in chatdev-reporter server and any ``mcp_local``
         servers declared in the node's YAML tooling section.
+
+        Supports ``${WORKSPACE_ROOT}`` placeholder in MCP ``args`` — resolved
+        at runtime to the agent's current workspace path.
 
         Returns the path to the temp file, or *None* if creation fails.
         """
@@ -688,14 +693,30 @@ class ClaudeCodeProvider(ModelProvider):
                         _seen_counter[base_name] = counter
                         server_name = f"{base_name}-{counter}"
 
+                    # Resolve ${WORKSPACE_ROOT} placeholder in args
+                    raw_args = list(cfg.args) if cfg.args else []
+                    if workspace_root:
+                        raw_args = [
+                            a.replace("${WORKSPACE_ROOT}", str(workspace_root))
+                            for a in raw_args
+                        ]
                     entry: Dict[str, Any] = {
                         "command": cfg.command,
-                        "args": list(cfg.args) if cfg.args else [],
+                        "args": raw_args,
                     }
                     if cfg.env:
-                        entry["env"] = dict(cfg.env)
+                        env = dict(cfg.env)
+                        if workspace_root:
+                            env = {
+                                k: v.replace("${WORKSPACE_ROOT}", str(workspace_root))
+                                for k, v in env.items()
+                            }
+                        entry["env"] = env
                     if cfg.cwd:
-                        entry["cwd"] = cfg.cwd
+                        cwd = cfg.cwd
+                        if workspace_root:
+                            cwd = cwd.replace("${WORKSPACE_ROOT}", str(workspace_root))
+                        entry["cwd"] = cwd
 
                     servers[server_name] = entry
 

@@ -34,6 +34,7 @@ graph:
           - Sequential Thinking tool: use it to plan complex implementations before coding
           - Context7 tool: use it to look up library/framework documentation (API references, usage examples, best practices)
           - Web Fetch tool: use it to look up technical references when needed
+          - Filesystem tool: use it to search files (search_files), view directory tree (directory_tree), and read multiple files at once (read_multiple_files)
           - File and code execution tools for reading, writing, and running code
 
           PROCESS:
@@ -72,11 +73,16 @@ graph:
             prefix: context7
             config:
               command: "npx"
-              args: ["-y", "@upstash/context7-mcp"]
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-7c2abc61-f4d3-48c1-b71b-4710e6f70486"]
           - type: mcp_local
             config:
               command: "npx"
               args: ["-y", "@anthropic-ai/mcp-server-fetch"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
 
     - id: Code Reviewer
       type: agent
@@ -92,6 +98,7 @@ graph:
           You have access to:
           - Sequential Thinking tool: use it to systematically work through your review checklist
           - Context7 tool: use it to verify correct library/framework API usage in the code
+          - Filesystem tool: use search_files to find relevant files, directory_tree to understand project structure
 
           CHECK LIST:
           1. Correctness — does the code implement the requirements?
@@ -123,7 +130,12 @@ graph:
             prefix: context7
             config:
               command: "npx"
-              args: ["-y", "@upstash/context7-mcp"]
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-7c2abc61-f4d3-48c1-b71b-4710e6f70486"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
 
     - id: Review Loop Counter
       type: loop_counter
@@ -145,8 +157,11 @@ graph:
         role: |
           You are a Software Tester. Verify that the code works correctly.
 
+          You have access to:
+          - Filesystem tool: use search_files and directory_tree to quickly find test files and understand project structure
+
           PROCESS:
-          1. Read source code to understand what was implemented
+          1. Use directory_tree to understand the project layout, then read source code
           2. Run existing tests if available (using uv_run)
           3. If no tests exist, run the main program to verify basic functionality
           4. Check for runtime errors, crashes, or incorrect behavior
@@ -168,6 +183,11 @@ graph:
                 - name: read_file_segment
                 - name: search_in_files
                 - name: list_directory
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
 
     - id: Bug Fixer
       type: agent
@@ -183,6 +203,7 @@ graph:
           You have access to:
           - Sequential Thinking tool: use it to analyze the root cause of bugs step by step
           - Context7 tool: use it to look up correct API usage if the bug is related to library misuse
+          - Filesystem tool: use search_files to locate bug-related files, directory_tree to understand project structure
 
           RULES:
           - Fix ONLY the reported bugs — do NOT rewrite or refactor unrelated code
@@ -212,7 +233,12 @@ graph:
             prefix: context7
             config:
               command: "npx"
-              args: ["-y", "@upstash/context7-mcp"]
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-7c2abc61-f4d3-48c1-b71b-4710e6f70486"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
 
     - id: Test Loop Counter
       type: loop_counter

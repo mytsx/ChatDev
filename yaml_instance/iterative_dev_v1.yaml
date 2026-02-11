@@ -176,6 +176,7 @@ graph:
 
           You have access to:
           - Context7 tool: use it to look up testing patterns, framework-specific test APIs, and library docs
+          - Filesystem tool: use search_files to find test files, directory_tree to understand project layout
           - File reading and code execution tools
 
           PROCESS:
@@ -205,7 +206,12 @@ graph:
             prefix: context7
             config:
               command: "npx"
-              args: ["-y", "@upstash/context7-mcp"]
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-7c2abc61-f4d3-48c1-b71b-4710e6f70486"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
 
     - id: Integration Fix Counter
       type: loop_counter
@@ -230,6 +236,7 @@ graph:
           You have access to:
           - Sequential Thinking tool: use it to analyze complex multi-file integration issues step by step
           - Context7 tool: use it to look up correct API usage, library docs, and framework patterns
+          - Filesystem tool: use search_files to locate integration issues across files, directory_tree to understand project structure
 
           RULES:
           - Fix ONLY the reported integration issues
@@ -259,7 +266,12 @@ graph:
             prefix: context7
             config:
               command: "npx"
-              args: ["-y", "@upstash/context7-mcp"]
+              args: ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-7c2abc61-f4d3-48c1-b71b-4710e6f70486"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
 
     # ── Phase 09: Final Review (Human) ──────────────────────────────
     - id: Final Review
@@ -288,9 +300,10 @@ graph:
 
           You have access to:
           - Web Fetch tool: use it to look up documentation standards or reference docs if needed
+          - Filesystem tool: use directory_tree to understand project structure, search_files to find all relevant files
 
           PROCESS:
-          1. Read all source code files
+          1. Use directory_tree to get the full project layout, then read source code files
           2. Create a README.md with:
              - Project overview
              - Installation instructions (dependencies, environment setup)
@@ -313,6 +326,11 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@anthropic-ai/mcp-server-fetch"]
+          - type: mcp_local
+            prefix: filesystem
+            config:
+              command: "npx"
+              args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
 
     - id: Delivery Summary
       type: agent
