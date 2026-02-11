@@ -104,25 +104,31 @@ class ToolManager:
 
         for idx, tool_config in enumerate(tool_configs):
             current_specs: List[ToolSpec] = []
-            if tool_config.type == "function":
-                config = tool_config.as_config(FunctionToolConfig)
-                if not config:
-                    raise ValueError("Function tooling configuration missing")
-                current_specs = self._build_function_specs(config)
-            elif tool_config.type == "mcp_remote":
-                config = tool_config.as_config(McpRemoteConfig)
-                if not config:
-                    raise ValueError("MCP remote configuration missing")
-                current_specs = self._build_mcp_remote_specs(config)
-            elif tool_config.type == "mcp_local":
-                config = tool_config.as_config(McpLocalConfig)
-                if not config:
-                    raise ValueError("MCP local configuration missing")
-                current_specs = self._build_mcp_local_specs(config)
-            else:
-                 # Skip unknown types or raise error? Existing code raised error in execute but ignored in get_specs?
-                 # Better to ignore or log warning for robustness, but let's stick to safe behavior.
-                 pass
+            try:
+                if tool_config.type == "function":
+                    config = tool_config.as_config(FunctionToolConfig)
+                    if not config:
+                        raise ValueError("Function tooling configuration missing")
+                    current_specs = self._build_function_specs(config)
+                elif tool_config.type == "mcp_remote":
+                    config = tool_config.as_config(McpRemoteConfig)
+                    if not config:
+                        raise ValueError("MCP remote configuration missing")
+                    current_specs = self._build_mcp_remote_specs(config)
+                elif tool_config.type == "mcp_local":
+                    config = tool_config.as_config(McpLocalConfig)
+                    if not config:
+                        raise ValueError("MCP local configuration missing")
+                    current_specs = self._build_mcp_local_specs(config)
+                else:
+                    pass
+            except Exception as exc:
+                server_hint = getattr(tool_config, "prefix", None) or tool_config.type
+                logger.warning(
+                    "Failed to load tooling[%d] (%s), skipping: %s",
+                    idx, server_hint, exc,
+                )
+                continue
 
             prefix = tool_config.prefix
             for spec in current_specs:
