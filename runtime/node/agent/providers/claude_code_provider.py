@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from entity.configs import AgentConfig
-from entity.configs.node.tooling import McpLocalConfig, ToolingConfig
+from entity.configs.node.tooling import McpLocalConfig, McpRemoteConfig, ToolingConfig
 from entity.messages import (
     Message,
     MessageRole,
@@ -664,12 +664,55 @@ class ClaudeCodeProvider(ModelProvider):
                     },
                 }
 
-            # --- YAML-defined mcp_local servers ---
+            # --- YAML-defined MCP servers (mcp_local + mcp_remote) ---
             if tooling_configs:
                 _seen_counter: Dict[str, int] = {}
                 for tc in tooling_configs:
-                    if tc.type != "mcp_local":
+                    if tc.type not in ("mcp_local", "mcp_remote"):
                         continue
+
+                    # --- mcp_remote: HTTP-based MCP servers ---
+                    if tc.type == "mcp_remote":
+                        cfg_r = tc.config
+                        if not isinstance(cfg_r, McpRemoteConfig):
+                            continue
+                        server_name = (tc.prefix or "").strip()
+                        if not server_name:
+                            # Infer name from URL host
+                            try:
+                                from urllib.parse import urlparse
+                                host = urlparse(cfg_r.server).hostname or ""
+                                # mcp.deepwiki.com → deepwiki
+                                parts = host.replace(".", "-").split("-")
+                                # Try to pick meaningful middle part
+                                server_name = (
+                                    parts[1] if len(parts) > 2 and parts[0] == "mcp"
+                                    else parts[0] if parts else "mcp-remote"
+                                )
+                            except Exception:
+                                server_name = "mcp-remote"
+
+                        # Deduplicate
+                        base_name = server_name
+                        counter = _seen_counter.get(base_name, 0) + 1
+                        _seen_counter[base_name] = counter
+                        if counter > 1:
+                            server_name = f"{base_name}-{counter}"
+                        while server_name in servers:
+                            counter += 1
+                            _seen_counter[base_name] = counter
+                            server_name = f"{base_name}-{counter}"
+
+                        entry_r: Dict[str, Any] = {
+                            "type": "http",
+                            "url": cfg_r.server,
+                        }
+                        if cfg_r.headers:
+                            entry_r["headers"] = dict(cfg_r.headers)
+                        servers[server_name] = entry_r
+                        continue
+
+                    # --- mcp_local: stdio-based MCP servers ---
                     cfg = tc.config
                     if not isinstance(cfg, McpLocalConfig):
                         continue

@@ -33,6 +33,7 @@ graph:
           You have access to:
           - Sequential Thinking tool: use it to plan complex implementations before coding
           - Context7 tool: use it to look up library/framework documentation (API references, usage examples, best practices)
+          - DeepWiki tool: use it to read documentation and ask questions about GitHub repositories (e.g. framework internals, library architecture)
           - Web Fetch tool: use it to look up technical references when needed
           - Filesystem tool: use it to search files (search_files), view directory tree (directory_tree), and read multiple files at once (read_multiple_files)
           - File and code execution tools for reading, writing, and running code
@@ -83,6 +84,10 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
 
     - id: Code Reviewer
       type: agent
@@ -98,6 +103,7 @@ graph:
           You have access to:
           - Sequential Thinking tool: use it to systematically work through your review checklist
           - Context7 tool: use it to verify correct library/framework API usage in the code
+          - DeepWiki tool: use it to check library/framework documentation from GitHub repos
           - Filesystem tool: use search_files to find relevant files, directory_tree to understand project structure
 
           CHECK LIST:
@@ -136,6 +142,10 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
 
     - id: Review Loop Counter
       type: loop_counter
@@ -203,6 +213,7 @@ graph:
           You have access to:
           - Sequential Thinking tool: use it to analyze the root cause of bugs step by step
           - Context7 tool: use it to look up correct API usage if the bug is related to library misuse
+          - DeepWiki tool: use it to read GitHub repo documentation for library/framework troubleshooting
           - Filesystem tool: use search_files to locate bug-related files, directory_tree to understand project structure
 
           RULES:
@@ -239,6 +250,10 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
 
     - id: Test Loop Counter
       type: loop_counter

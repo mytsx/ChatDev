@@ -176,6 +176,7 @@ graph:
 
           You have access to:
           - Context7 tool: use it to look up testing patterns, framework-specific test APIs, and library docs
+          - DeepWiki tool: use it to read documentation about GitHub repos (testing frameworks, libraries)
           - Filesystem tool: use search_files to find test files, directory_tree to understand project layout
           - File reading and code execution tools
 
@@ -212,6 +213,10 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
 
     - id: Integration Fix Counter
       type: loop_counter
@@ -236,6 +241,7 @@ graph:
           You have access to:
           - Sequential Thinking tool: use it to analyze complex multi-file integration issues step by step
           - Context7 tool: use it to look up correct API usage, library docs, and framework patterns
+          - DeepWiki tool: use it to read GitHub repo documentation for troubleshooting integration issues
           - Filesystem tool: use search_files to locate integration issues across files, directory_tree to understand project structure
 
           RULES:
@@ -272,6 +278,10 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "${WORKSPACE_ROOT}"]
+          - type: mcp_remote
+            prefix: deepwiki
+            config:
+              server: "https://mcp.deepwiki.com/mcp"
 
     # ── Phase 09: Final Review (Human) ──────────────────────────────
     - id: Final Review
