@@ -3,11 +3,12 @@
 import asyncio
 import base64
 import binascii
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import inspect
 import logging
 import mimetypes
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
@@ -94,10 +95,87 @@ class ToolManager:
         client = self._get_stdio_client(config, launch_key)
         return client.list_tools()
 
-    def get_tool_specs(self, tool_configs: List[ToolingConfig] | None) -> List[ToolSpec]:
+    # Pattern for runtime-resolved environment placeholders: $ENV{VAR_NAME}
+    _ENV_PLACEHOLDER = re.compile(r"\$ENV\{([A-Za-z0-9_]+)\}")
+
+    @staticmethod
+    def _resolve_env_str(value: str, env_map: Dict[str, str]) -> tuple[str, bool]:
+        """Resolve ``$ENV{VAR}`` placeholders in a single string."""
+        ok = True
+
+        def replacer(m: re.Match) -> str:
+            nonlocal ok
+            val = env_map.get(m.group(1))
+            if val is None:
+                ok = False
+                return m.group(0)
+            return val
+
+        resolved = ToolManager._ENV_PLACEHOLDER.sub(replacer, value)
+        return resolved, ok
+
+    def _resolve_mcp_local_config(
+        self, config: McpLocalConfig, env_map: Dict[str, str],
+    ) -> McpLocalConfig | None:
+        """Return a copy of *config* with ``$ENV{VAR}`` resolved, or None if unresolvable."""
+        all_ok = True
+        new_args = []
+        for a in (config.args or []):
+            if isinstance(a, str):
+                resolved, ok = self._resolve_env_str(a, env_map)
+                if not ok:
+                    all_ok = False
+                new_args.append(resolved)
+            else:
+                new_args.append(a)
+        new_cwd = config.cwd
+        if new_cwd:
+            new_cwd, ok = self._resolve_env_str(new_cwd, env_map)
+            if not ok:
+                all_ok = False
+        new_env = dict(config.env) if config.env else {}
+        for k, v in new_env.items():
+            if isinstance(v, str):
+                resolved, ok = self._resolve_env_str(v, env_map)
+                if not ok:
+                    all_ok = False
+                new_env[k] = resolved
+        if not all_ok:
+            return None
+        return replace(config, args=new_args, cwd=new_cwd, env=new_env)
+
+    def _resolve_mcp_remote_config(
+        self, config: McpRemoteConfig, env_map: Dict[str, str],
+    ) -> McpRemoteConfig | None:
+        """Return a copy of *config* with ``$ENV{VAR}`` resolved, or None if unresolvable."""
+        new_server, ok = self._resolve_env_str(config.server, env_map)
+        if not ok:
+            return None
+        new_headers = dict(config.headers) if config.headers else {}
+        all_ok = True
+        for k, v in new_headers.items():
+            if isinstance(v, str):
+                resolved, ok_h = self._resolve_env_str(v, env_map)
+                if not ok_h:
+                    all_ok = False
+                new_headers[k] = resolved
+        if not all_ok:
+            return None
+        return replace(config, server=new_server, headers=new_headers)
+
+    def get_tool_specs(
+        self,
+        tool_configs: List[ToolingConfig] | None,
+        env_overrides: Dict[str, str] | None = None,
+    ) -> List[ToolSpec]:
         """Return provider-agnostic tool specifications for the given config list."""
         if not tool_configs:
             return []
+
+        # Build env map for $ENV{VAR} resolution
+        env_map: Dict[str, str] = dict(os.environ)
+        if env_overrides:
+            env_map.update(env_overrides)
 
         specs: List[ToolSpec] = []
         seen_tools: set[str] = set()
@@ -114,12 +192,20 @@ class ToolManager:
                     config = tool_config.as_config(McpRemoteConfig)
                     if not config:
                         raise ValueError("MCP remote configuration missing")
-                    current_specs = self._build_mcp_remote_specs(config)
+                    resolved = self._resolve_mcp_remote_config(config, env_map)
+                    if resolved is None:
+                        logger.info("Skipping mcp_remote[%d] (unresolved $ENV placeholder)", idx)
+                        continue
+                    current_specs = self._build_mcp_remote_specs(resolved)
                 elif tool_config.type == "mcp_local":
                     config = tool_config.as_config(McpLocalConfig)
                     if not config:
                         raise ValueError("MCP local configuration missing")
-                    current_specs = self._build_mcp_local_specs(config)
+                    resolved = self._resolve_mcp_local_config(config, env_map)
+                    if resolved is None:
+                        logger.info("Skipping mcp_local[%d] (unresolved $ENV placeholder)", idx)
+                        continue
+                    current_specs = self._build_mcp_local_specs(resolved)
                 else:
                     pass
             except Exception as exc:

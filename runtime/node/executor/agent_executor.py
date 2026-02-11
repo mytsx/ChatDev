@@ -82,7 +82,12 @@ class AgentNodeExecutor(NodeExecutor):
             else:
                 conversation = self._prepare_message_conversation(node, inputs)
             call_options = self._prepare_call_options(node)
-            tool_specs = self.tool_manager.get_tool_specs(agent_config.tooling)
+            env_overrides = {}
+            if agent_config.workspace_root:
+                env_overrides["WORKSPACE_ROOT"] = str(agent_config.workspace_root)
+            tool_specs = self.tool_manager.get_tool_specs(
+                agent_config.tooling, env_overrides=env_overrides or None,
+            )
 
             agent_invoker = self._build_agent_invoker(
                 provider,
