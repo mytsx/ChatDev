@@ -201,6 +201,9 @@ graph:
           - DeepWiki: read GitHub repo docs for frameworks you plan to use
           - Exa Search: research architecture patterns, technology benchmarks, security advisories
           - Filesystem: explore existing codebase structure if present
+          - Oracle DB: LIVE connection to Oracle 19c production database — query schema, tables, views,
+            PL/SQL objects, constraints, indexes, relationships. USE THIS to understand the existing
+            database before designing new tables or modifications.
 
           ═══ PART A: SYSTEM ARCHITECTURE ═══
 
@@ -220,12 +223,22 @@ graph:
 
           ═══ PART B: DATABASE DESIGN ═══
 
+          CRITICAL: You have LIVE Oracle DB access. Before designing ANY database changes:
+          1. Use Oracle DB tools to explore the EXISTING schema — run get_tables_schema,
+             search_tables_schema, get_table_constraints, get_table_indexes
+          2. Understand existing table structures, relationships (FKs), and naming conventions
+          3. Check existing views and PL/SQL objects (get_pl_sql_objects, get_object_source)
+          4. Design new tables/columns that are CONSISTENT with existing schema conventions
+          5. If modifying existing tables, verify current constraints and dependent objects first
+
+          DESIGN RULES:
           - Apply normalization (3NF minimum; denormalize only with measured justification)
           - Define PKs, FKs, unique constraints, check constraints
           - Design indexes based on query patterns from API contracts
           - Plan migration strategy with rollback capability
           - Soft deletes (deleted_at) for user-facing data
           - Timestamps (created_at, updated_at) on all tables
+          - ALWAYS match existing naming conventions (check existing tables first via Oracle DB tools)
 
           ═══ PART C: SECURITY DESIGN ═══
 
@@ -362,6 +375,13 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: oracle
+            config:
+              command: "uvx"
+              args: ["oracle-mcp-server"]
+              env:
+                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
 
     # ══════════════════════════════════════════════════════════════════
     # Phase 3: Plan Approval
@@ -438,13 +458,23 @@ graph:
           - Exa Search: find code examples, best practices, Stack Overflow solutions
           - Filesystem: explore project structure
           - Web Fetch: look up technical references
+          - Oracle DB: LIVE connection to Oracle 19c database — query existing tables, views,
+            PL/SQL source code, constraints, indexes, relationships, and run SQL queries.
+            This is your PRIMARY tool for understanding the database layer.
 
           PROCESS:
           1. Read your assigned task and the architecture document
           2. Read existing code in ${BACKEND_DIR}/ to understand current state and conventions
-          3. Use Context7 to verify correct API usage for EVERY library you use
-          4. Implement in order: models/entities → business logic/services → API controllers + DTOs → unit tests
-          5. Save all files and verify the project compiles (dotnet build)
+          3. Use Oracle DB tools to explore the database:
+             - get_tables_schema / search_tables_schema: understand existing table structures
+             - get_object_source: read existing PL/SQL procedures, functions, packages, triggers
+             - get_table_constraints / get_table_indexes: understand existing constraints and indexes
+             - get_related_tables: understand FK relationships between tables
+             - run_sql_query: test queries, verify data patterns, check existing data
+             - get_view_definition (search_columns): understand existing views and find columns
+          4. Use Context7 to verify correct API usage for EVERY library you use
+          5. Implement in order: models/entities → business logic/services → API controllers + DTOs → unit tests
+          6. Save all files and verify the project compiles (dotnet build)
 
           ═══ BACKEND GUIDELINES ═══
 
@@ -453,6 +483,12 @@ graph:
           - Service Layer: Business logic in service functions, not in API controllers
           - Dependency Injection: Use .NET built-in DI container
           - Error as typed exceptions: Return structured error responses
+
+          DATABASE ACCESS:
+          - ALWAYS use Oracle DB tools to verify table/column names before writing queries
+          - Entity models MUST match actual Oracle table schemas exactly (column names, types, nullable)
+          - If the task requires new tables, create Oracle DDL scripts in ${BACKEND_DIR}/sql/
+          - If using existing views or stored procedures, read their source first via get_object_source
 
           DESIGN PRINCIPLES:
           - **SRP**: Each function does ONE thing
@@ -500,6 +536,13 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: oracle
+            config:
+              command: "uvx"
+              args: ["oracle-mcp-server"]
+              env:
+                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
 
     - id: Frontend Developer
       type: agent
@@ -647,12 +690,21 @@ graph:
           You receive: Reviewer's feedback identifying problems in backend, frontend, or both.
           Your output goes to → Reviewer (who will re-audit the fixes).
 
+          AVAILABLE TOOLS:
+          - Context7: look up .NET/C# and Angular API docs
+          - Filesystem: read and modify source files
+          - Oracle DB: LIVE connection to Oracle 19c database — verify table schemas,
+            check constraints, test SQL queries. Use this when fixing DB-related issues
+            (wrong column names, incorrect joins, missing constraints, etc.)
+
           PROCESS:
           1. Read the Reviewer's findings carefully
           2. For each finding, identify the file(s) that need changes
           3. Read the existing code to understand context
-          4. Apply the MINIMAL fix for each issue
-          5. Verify fixes compile/build in both projects if applicable
+          4. For DB-related fixes, use Oracle DB tools to verify actual table schemas,
+             column types, and constraints before making changes
+          5. Apply the MINIMAL fix for each issue
+          6. Verify fixes compile/build in both projects if applicable
 
           For each fix, clearly document:
           1. What was the issue (from Reviewer's feedback)
@@ -683,6 +735,13 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: oracle
+            config:
+              command: "uvx"
+              args: ["oracle-mcp-server"]
+              env:
+                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
 
     - id: Reviewer
       type: agent
@@ -875,16 +934,24 @@ graph:
           - Sequential Thinking: plan test strategy, trace bug root causes
           - Context7: look up testing framework APIs, assertion libraries
           - Filesystem: read source code, write test files, run tests
+          - Oracle DB: LIVE connection to Oracle 19c database — verify data integrity,
+            check that DB operations produce correct results, validate schema changes,
+            run test queries to confirm data flows. Use this for backend data verification.
 
           ═══ PART A: FUNCTIONAL TESTING ═══
 
           TEST CHECKLIST:
           1. **Functional Completeness**: Every FR-N requirement has working functionality
           2. **API Verification**: Every endpoint returns correct status codes and response schemas
-          3. **Frontend Verification**: Every screen renders with correct data, all states work
-          4. **Integration**: Frontend ↔ Backend data flow works end-to-end
-          5. **Error Handling**: Invalid inputs return proper error responses (not 500s)
-          6. **Edge Cases**: Empty inputs, boundary values, concurrent operations
+          3. **Database Verification**: Use Oracle DB tools to verify:
+             - New tables/columns created correctly (get_tables_schema)
+             - Constraints and indexes in place (get_table_constraints, get_table_indexes)
+             - Data written by API calls is persisted correctly (run_sql_query)
+             - FK relationships are valid (get_related_tables)
+          4. **Frontend Verification**: Every screen renders with correct data, all states work
+          5. **Integration**: Frontend ↔ Backend ↔ Database data flow works end-to-end
+          6. **Error Handling**: Invalid inputs return proper error responses (not 500s)
+          7. **Edge Cases**: Empty inputs, boundary values, concurrent operations
 
           ═══ PART B: AUTOMATED TEST WRITING ═══
 
@@ -963,6 +1030,13 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: oracle
+            config:
+              command: "uvx"
+              args: ["oracle-mcp-server"]
+              env:
+                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
 
     - id: QA Counter
       type: loop_counter
