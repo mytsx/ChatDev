@@ -71,7 +71,8 @@ class CopilotCliProvider(CliProviderBase):
             cmd.extend(["--resume", session_id])
 
         if mcp_config_path:
-            cmd.extend(["--additional-mcp-config", mcp_config_path])
+            # Copilot requires @ prefix for file paths (vs inline JSON)
+            cmd.extend(["--additional-mcp-config", f"@{mcp_config_path}"])
 
         if self._model_flag:
             cmd.extend(["--model", self._model_flag])
@@ -93,7 +94,7 @@ class CopilotCliProvider(CliProviderBase):
             "--resume", session_id,
         ]
         if mcp_config_path:
-            cmd.extend(["--additional-mcp-config", mcp_config_path])
+            cmd.extend(["--additional-mcp-config", f"@{mcp_config_path}"])
         if self._model_flag:
             cmd.extend(["--model", self._model_flag])
         return cmd
