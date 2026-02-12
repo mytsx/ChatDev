@@ -39,8 +39,8 @@ graph:
       description: "Phase 01 — Analyzes requirements, defines UX specs, and creates acceptance criteria."
       context_window: 0
       config:
-        provider: gemini-cli
-        name: gemini-2.5-pro
+        provider: claude-code
+        name: opus
         skip_memory: true
         max_turns: 45
         role: |
