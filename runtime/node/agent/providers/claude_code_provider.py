@@ -379,6 +379,8 @@ class ClaudeCodeProvider(ModelProvider):
                             text = block.get("text", "")
                             if text:
                                 accumulated_text.append(text)
+                                if stream_callback:
+                                    stream_callback("text_delta", {"text": text})
                             # Text after a tool means tool finished
                             if pending_tool and stream_callback:
                                 stream_callback("tool_end", pending_tool)

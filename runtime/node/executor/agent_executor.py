@@ -38,6 +38,35 @@ from runtime.node.agent import ModelProvider, ProviderRegistry, ModelResponse
 from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
 
+def _extract_tool_detail(tool_name: str, tool_input: dict) -> str:
+    """Extract a short human-readable detail from tool input."""
+    file_path = tool_input.get("file_path", tool_input.get("path", ""))
+    if file_path:
+        return file_path.rsplit("/", 1)[-1]
+
+    command = tool_input.get("command", "")
+    if command:
+        return command[:80] + ("..." if len(command) > 80 else "")
+
+    pattern = tool_input.get("pattern", "")
+    if pattern:
+        return f'"{pattern[:60]}"'
+
+    query = tool_input.get("query", "")
+    if query:
+        return query[:60] + ("..." if len(query) > 60 else "")
+
+    url = tool_input.get("url", "")
+    if url:
+        return url[:80]
+
+    thought = tool_input.get("thought", "")
+    if thought:
+        return thought[:80] + ("..." if len(thought) > 80 else "")
+
+    return ""
+
+
 class AgentNodeExecutor(NodeExecutor):
     """Executor that runs agent nodes."""
     
@@ -298,6 +327,12 @@ class AgentNodeExecutor(NodeExecutor):
         # events (Write, Edit, Bash, etc.) appear in the UI as they happen.
         if agent_config and agent_config.provider == "claude-code":
             def _stream_callback(event_type: str, data: dict) -> None:
+                if event_type == "text_delta":
+                    text = data.get("text", "")
+                    if text.strip():
+                        self.log_manager.record_agent_text(node.id, text)
+                    return
+
                 tool_name = data.get("name", "unknown")
                 tool_input = data.get("input", {})
                 display_name = f"claude:{tool_name}"
@@ -311,6 +346,8 @@ class AgentNodeExecutor(NodeExecutor):
                 else:
                     short_path = ""
 
+                tool_detail = _extract_tool_detail(tool_name, tool_input)
+
                 if event_type == "tool_start":
                     desc = f"Executing {tool_name}"
                     if short_path:
@@ -323,6 +360,7 @@ class AgentNodeExecutor(NodeExecutor):
                         details={
                             "arguments": tool_input,
                             "tool_name": display_name,
+                            "tool_detail": tool_detail,
                             "streaming": True,
                         },
                         stage=CallStage.BEFORE,
@@ -340,6 +378,7 @@ class AgentNodeExecutor(NodeExecutor):
                         details={
                             "arguments": tool_input,
                             "tool_name": display_name,
+                            "tool_detail": tool_detail,
                             "streaming": True,
                         },
                         stage=CallStage.AFTER,

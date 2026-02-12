@@ -146,6 +146,10 @@ class LogManager:
         }
         self.logger.record_tool_call(node_id, tool_name, tool_result, duration, success, tool_details, stage)
 
+    def record_agent_text(self, node_id: str, text: str) -> None:
+        """Record agent reasoning text for real-time streaming."""
+        self.logger.record_agent_text(node_id, text)
+
     def record_thinking_process(self, node_id: str, thinking_mode: str, thinking_result: str,
                                 stage: str, details: Dict[str, Any] = None) -> None:
         """Record a thinking stage."""

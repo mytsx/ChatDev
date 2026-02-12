@@ -77,11 +77,22 @@
                       }"
                     >
                       <span class="loading-entry-label">{{ entry.label }}</span>
+                      <span v-if="entry.detail" class="loading-entry-detail">{{ entry.detail }}</span>
                       <span class="loading-entry-duration">
                         {{ formatDuration(entry.startedAt, entry.endedAt || null) }}
                       </span>
                     </div>
                   </TransitionGroup>
+
+                  <!-- Agent reasoning text (streamed in real-time) -->
+                  <div v-if="message.agentThought" class="agent-reasoning">
+                    <CollapsibleMessage
+                      :html-content="renderMarkdown(message.agentThought)"
+                      :raw-content="message.agentThought"
+                      :max-height="120"
+                      :default-expanded="true"
+                    />
+                  </div>
 
                   <!-- Artifact image -->
 
@@ -595,7 +606,7 @@ const addTotalLoadingMessage = (nodeId) => {
 }
 
 // Add a loading entry (model/tool call) and associate it with baseKey
-const addLoadingEntry = (nodeId, baseKey, label) => {
+const addLoadingEntry = (nodeId, baseKey, label, detail = '') => {
   const nodeState = addTotalLoadingMessage(nodeId)
   if (!nodeState || !baseKey) return null
 
@@ -607,6 +618,7 @@ const addLoadingEntry = (nodeId, baseKey, label) => {
     key,
     baseKey,
     label,
+    detail,
     status: 'running',
     startedAt: Date.now(),
     endedAt: null
@@ -631,6 +643,23 @@ const finishLoadingEntry = (nodeId, baseKey) => {
   entry.endedAt = Date.now()
   nodeState.baseKeyToKey.delete(baseKey)
   return entry
+}
+
+// Update agent thought text for real-time reasoning display
+const updateAgentThought = (nodeId, text) => {
+  const nodeState = addTotalLoadingMessage(nodeId)
+  if (!nodeState) return
+
+  if (!nodeState.message.agentThought) {
+    nodeState.message.agentThought = ''
+  }
+  nodeState.message.agentThought += text
+
+  const MAX_LEN = 2000
+  if (nodeState.message.agentThought.length > MAX_LEN) {
+    nodeState.message.agentThought = '...' +
+      nodeState.message.agentThought.slice(-MAX_LEN)
+  }
 }
 
 // Finish all running entries when a node ends or cancels
@@ -2152,13 +2181,22 @@ const processMessage = async (msg) => {
       // Tool call started
       if (msg.data.details.stage === "before") {
         const baseKey = `tool-${msg.data.details.tool_name || 'unknown'}`
-        addLoadingEntry(nodeId, baseKey, `Tool ${msg.data.details.tool_name}`)
+        const detail = msg.data.details.tool_detail || ''
+        addLoadingEntry(nodeId, baseKey, `Tool ${msg.data.details.tool_name}`, detail)
       }
 
       // Tool call ended
       if (msg.data.details.stage === "after") {
         const baseKey = `tool-${msg.data.details.tool_name || 'unknown'}`
         finishLoadingEntry(nodeId, baseKey)
+      }
+    }
+
+    // Agent reasoning text (streamed in real-time)
+    else if (eventType === 'AGENT_TEXT') {
+      const text = msg.data.details?.text || ''
+      if (text.trim() && nodeId) {
+        updateAgentThought(nodeId, text)
       }
     }
 
@@ -2175,6 +2213,7 @@ const processMessage = async (msg) => {
         if (nodeState) {
           const endedAt = Date.now()
           finalizeAllLoadingEntries(nodeState, endedAt)
+          nodeState.message.agentThought = ''
           nodeState.message.isLoading = false
           nodeState.message.duration = formatDuration(nodeState.message.startedAt, endedAt)
           nodesLoadingMessagesMap.delete(nodeId)
@@ -2657,6 +2696,16 @@ watch(
   color: rgba(255, 255, 255, 0.9);
 }
 
+.loading-entry-detail {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, monospace;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .loading-entry-duration {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
@@ -2707,6 +2756,14 @@ watch(
     border-color: rgba(153, 234, 249, 0.6);
     background: rgba(255, 255, 255, 0.06);
   }
+}
+
+.agent-reasoning {
+  margin: 8px 0 4px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid rgba(153, 234, 249, 0.4);
+  border-radius: 0 6px 6px 0;
 }
 
 .message-text {

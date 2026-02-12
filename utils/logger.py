@@ -270,6 +270,16 @@ class WorkflowLogger:
             duration=duration
         )
 
+    def record_agent_text(self, node_id: str, text: str) -> None:
+        """Record a chunk of agent reasoning text for real-time streaming."""
+        self.add_log(
+            LogLevel.INFO,
+            f"Agent text for node {node_id}",
+            node_id=node_id,
+            event_type=EventType.AGENT_TEXT,
+            details={"text": text},
+        )
+
     def record_thinking_process(self, node_id: str, thinking_mode: str, thinking_result: str, stage: str,
                                 duration: float = None, details: Dict[str, Any] = None) -> None:
         """Record a thinking-stage entry."""
