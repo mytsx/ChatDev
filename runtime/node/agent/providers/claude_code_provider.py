@@ -211,7 +211,7 @@ class ClaudeCodeProvider(ModelProvider):
         before_snapshot = self._snapshot_workspace(cwd) if cwd else {}
 
         timeout = kwargs.pop("timeout", 600)
-        idle_timeout = kwargs.pop("idle_timeout", 600)
+        idle_timeout = kwargs.pop("idle_timeout", 900)
 
         try:
             raw_response, stderr_text = self._run_streaming(
@@ -357,7 +357,7 @@ class ClaudeCodeProvider(ModelProvider):
         cwd: Optional[str],
         timeout: int,
         stream_callback: Optional[Any],
-        idle_timeout: int = 600,
+        idle_timeout: int = 900,
     ) -> tuple:
         """Run Claude Code CLI with Popen, parse NDJSON stream in real time.
 
@@ -569,7 +569,7 @@ class ClaudeCodeProvider(ModelProvider):
         timeout: int,
         stream_callback: Optional[Any],
         mcp_config_path: Optional[str],
-        idle_timeout: int = 600,
+        idle_timeout: int = 900,
     ) -> tuple:
         """Resume session after a stall (idle timeout).
 
