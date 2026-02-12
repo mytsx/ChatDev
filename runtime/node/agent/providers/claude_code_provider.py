@@ -1096,6 +1096,13 @@ class ClaudeCodeProvider(ModelProvider):
     _SCAN_EXCLUDE_DIRS = frozenset({
         "__pycache__", ".git", ".venv", "venv", "node_modules",
         ".mypy_cache", ".pytest_cache", "attachments",
+        # Build/dependency directories
+        "dist", ".build", "Build", "DerivedData",
+        "Pods", ".dart_tool", ".pub-cache",
+        ".gradle", ".idea", ".vs", ".vscode",
+        "target", "obj",
+        "coverage", ".nyc_output",
+        "generated",
     })
 
     _SCAN_EXCLUDE_FILES = frozenset({
@@ -1105,6 +1112,21 @@ class ClaudeCodeProvider(ModelProvider):
         "desktop.ini",
         ".claude_sessions.json",
     })
+
+    _SNAPSHOT_HIDDEN_WHITELIST = frozenset({".github"})
+
+    @staticmethod
+    def _load_gitignore_spec(workspace_root: str):
+        """Load .gitignore patterns from workspace root. Returns pathspec or None."""
+        try:
+            import pathspec
+            gitignore_path = Path(workspace_root) / ".gitignore"
+            if gitignore_path.exists():
+                with open(gitignore_path, "r") as f:
+                    return pathspec.PathSpec.from_lines("gitwildmatch", f)
+        except Exception:
+            pass
+        return None
 
     def _snapshot_workspace(self, workspace_root: str) -> Dict[str, tuple]:
         """Take a lightweight snapshot of workspace files.
@@ -1116,18 +1138,24 @@ class ClaudeCodeProvider(ModelProvider):
         if not root.exists():
             return snapshot
 
+        gitignore_spec = self._load_gitignore_spec(workspace_root)
+
         for item in root.rglob("*"):
             if not item.is_file():
                 continue
             rel = item.relative_to(root)
-            # Skip hidden and excluded directories
+            # Skip hidden (except whitelisted) and excluded directories
             if any(
-                part.startswith(".") or part in self._SCAN_EXCLUDE_DIRS
+                (part.startswith(".") and part not in self._SNAPSHOT_HIDDEN_WHITELIST)
+                or part in self._SCAN_EXCLUDE_DIRS
                 for part in rel.parts[:-1]  # check parent dirs, not filename
             ):
                 continue
             # Skip excluded files (e.g., firebase-debug.log, .DS_Store)
             if rel.name in self._SCAN_EXCLUDE_FILES:
+                continue
+            # Skip gitignored files
+            if gitignore_spec and gitignore_spec.match_file(str(rel)):
                 continue
             try:
                 st = item.stat()

@@ -38,6 +38,71 @@ from runtime.node.agent import ModelProvider, ProviderRegistry, ModelResponse
 from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
 
+# --- File tracking constants for artifact generation ---
+
+_SOURCE_EXTENSIONS = frozenset({
+    '.py', '.js', '.ts', '.jsx', '.tsx', '.vue', '.svelte',
+    '.java', '.kt', '.swift', '.dart', '.go', '.rs', '.rb',
+    '.c', '.cpp', '.h', '.hpp', '.cs', '.php',
+    '.html', '.css', '.scss', '.less', '.sass',
+    '.json', '.yaml', '.yml', '.toml', '.xml', '.env',
+    '.md', '.txt', '.rst', '.sql', '.sh', '.bash',
+    '.dockerfile', '.dockerignore', '.gitignore',
+    '.gradle', '.cmake', '.makefile',
+})
+
+_ARTIFACT_DIRS = frozenset({
+    'node_modules', '.venv', 'venv', '__pycache__',
+    'dist', '.build', 'Build', 'DerivedData',
+    'Pods', '.dart_tool', '.pub-cache',
+    '.gradle', '.idea', '.vs', '.vscode',
+    'target', 'obj',
+    'coverage', '.nyc_output', '.pytest_cache', '.mypy_cache',
+    'generated',
+})
+
+_HIDDEN_DIR_WHITELIST = frozenset({'.github'})
+
+_MAX_ARTIFACT_FILE_SIZE = 512 * 1024  # 512KB
+
+
+def _is_trackable_source_file(path: str, size: int) -> bool:
+    """Return True if the file is likely source code worth tracking as artifact."""
+    from pathlib import PurePosixPath
+    parts = PurePosixPath(path).parts
+
+    # Skip files inside artifact/build directories
+    if any(part in _ARTIFACT_DIRS for part in parts[:-1]):
+        return False
+
+    # .github/ directory: bypass extension check, only apply size limit
+    if any(part == '.github' for part in parts[:-1]):
+        return size <= _MAX_ARTIFACT_FILE_SIZE
+
+    # Skip other hidden directories
+    if any(
+        part.startswith('.') and part not in _HIDDEN_DIR_WHITELIST
+        for part in parts[:-1]
+    ):
+        return False
+
+    # Skip large files (binaries, APKs, etc.)
+    if size > _MAX_ARTIFACT_FILE_SIZE:
+        return False
+
+    # Only track known source extensions
+    ext = PurePosixPath(path).suffix.lower()
+    if ext and ext not in _SOURCE_EXTENSIONS:
+        return False
+
+    # Files without extension: only allow known names
+    if not ext:
+        name = PurePosixPath(path).name.lower()
+        return name in ('dockerfile', 'makefile', 'procfile', 'gemfile', 'rakefile', 'codeowners')
+
+    return True
+
+
 def _extract_tool_detail(tool_name: str, tool_input: dict) -> str:
     """Extract a short human-readable detail from tool input."""
     file_path = tool_input.get("file_path", tool_input.get("path", ""))
@@ -684,8 +749,8 @@ class AgentNodeExecutor(NodeExecutor):
                     stage=CallStage.AFTER,
                 )
 
-            # Attach created/modified files to response message for UI viewing
-            if change_type in ("created", "modified"):
+            # Attach created/modified source files to response message for UI viewing
+            if change_type in ("created", "modified") and _is_trackable_source_file(path, size):
                 try:
                     file_path = Path(workspace_root) / path
                     if file_path.exists() and file_path.is_file():
