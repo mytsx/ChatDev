@@ -40,3 +40,31 @@ if GeminiProvider is not None:
     )
 else:
     print("Gemini provider not registered: google-genai library not found.")
+
+# --- Gemini CLI (agentic CLI, uses Google account) ---
+try:
+    from runtime.node.agent.providers.gemini_cli_provider import GeminiCliProvider
+except (ImportError, FileNotFoundError):
+    GeminiCliProvider = None
+
+if GeminiCliProvider is not None:
+    ProviderRegistry.register(
+        "gemini-cli",
+        GeminiCliProvider,
+        label="Gemini CLI",
+        summary="Google Gemini via Gemini CLI (uses Google account, no API key needed)",
+    )
+
+# --- Copilot CLI (agentic CLI, uses GitHub Copilot subscription) ---
+try:
+    from runtime.node.agent.providers.copilot_cli_provider import CopilotCliProvider
+except (ImportError, FileNotFoundError):
+    CopilotCliProvider = None
+
+if CopilotCliProvider is not None:
+    ProviderRegistry.register(
+        "copilot-cli",
+        CopilotCliProvider,
+        label="GitHub Copilot CLI",
+        summary="GitHub Copilot via Copilot CLI (uses Copilot subscription, no API key needed)",
+    )

@@ -331,11 +331,11 @@ class AgentConfig(BaseConfig):
     tooling: List[ToolingConfig] = field(default_factory=list)
     thinking: ThinkingConfig | None = None
     memories: List[MemoryAttachmentConfig] = field(default_factory=list)
-    # Claude Code persistent session support
-    persistent_session: bool = True  # Keep session alive across calls (claude-code only)
-    skip_memory: bool = False  # Skip ChatDev memory system (claude-code manages its own)
-    max_turns: int | None = None  # Max agentic turns for Claude Code CLI (overrides provider default)
-    idle_timeout: int | None = None  # Seconds of no output before stall detection (claude-code only, default 900s)
+    # CLI provider persistent session support (claude-code, copilot-cli, gemini-cli)
+    persistent_session: bool = True  # Keep session alive across calls (CLI providers)
+    skip_memory: bool = False  # Skip ChatDev memory system (CLI providers manage their own)
+    max_turns: int | None = None  # Max agentic turns for CLI providers (overrides provider default)
+    idle_timeout: int | None = None  # Seconds of no output before stall detection (CLI providers, default 900s)
 
     # Runtime attributes (attached dynamically)
     token_tracker: Any | None = field(default=None, init=False, repr=False)
@@ -537,7 +537,7 @@ class AgentConfig(BaseConfig):
             type_hint="bool",
             required=False,
             default=True,
-            description="Keep Claude Code session alive across calls (claude-code provider only)",
+            description="Keep CLI session alive across calls (claude-code, copilot-cli, gemini-cli)",
             advance=True,
         ),
         "skip_memory": ConfigFieldSpec(
@@ -546,7 +546,7 @@ class AgentConfig(BaseConfig):
             type_hint="bool",
             required=False,
             default=False,
-            description="Skip ChatDev memory system when using claude-code provider (Claude manages its own context)",
+            description="Skip ChatDev memory system when using CLI providers (they manage their own context)",
             advance=True,
         ),
         "max_turns": ConfigFieldSpec(
@@ -554,7 +554,7 @@ class AgentConfig(BaseConfig):
             display_name="Max Turns",
             type_hint="int",
             required=False,
-            description="Maximum agentic turns for Claude Code CLI (overrides provider default of 30)",
+            description="Maximum agentic turns for CLI providers (overrides provider default of 30)",
             advance=True,
         ),
         "idle_timeout": ConfigFieldSpec(
@@ -562,7 +562,7 @@ class AgentConfig(BaseConfig):
             display_name="Idle Timeout",
             type_hint="int",
             required=False,
-            description="Seconds of no CLI output before stall detection triggers auto-recovery (claude-code only, default 900s, minimum 30s)",
+            description="Seconds of no CLI output before stall detection triggers auto-recovery (CLI providers, default 900s, minimum 30s)",
             advance=True,
         ),
     }

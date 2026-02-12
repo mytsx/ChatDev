@@ -202,9 +202,9 @@ class AgentNodeExecutor(NodeExecutor):
                     input_mode,
                 )
 
-            # Skip memory retrieval if configured (e.g., claude-code with persistent sessions)
+            # Skip memory retrieval if configured (e.g., CLI providers with persistent sessions)
             should_skip_memory = (
-                agent_config.provider == "claude-code" and
+                getattr(provider, 'is_cli_provider', False) and
                 getattr(agent_config, "skip_memory", False)
             )
 
@@ -243,9 +243,9 @@ class AgentNodeExecutor(NodeExecutor):
                 response_message = response_obj.message
 
             # Emit synthetic tool-call logs for files created/modified by
-            # Claude Code so the UI shows tool activity and file operations.
-            if agent_config.provider == "claude-code":
-                self._emit_claude_code_file_changes(node, response_obj, response_message)
+            # CLI providers so the UI shows tool activity and file operations.
+            if getattr(provider, 'is_cli_provider', False):
+                self._emit_cli_file_changes(node, response_obj, response_message, agent_config.provider)
 
             self._persist_message_attachments(response_message, node.id)
 
@@ -388,9 +388,11 @@ class AgentNodeExecutor(NodeExecutor):
 
         extra_kwargs: Dict[str, Any] = {}
 
-        # Build a real-time stream callback for Claude Code provider so tool
+        # Build a real-time stream callback for CLI providers so tool
         # events (Write, Edit, Bash, etc.) appear in the UI as they happen.
-        if agent_config and agent_config.provider == "claude-code":
+        if agent_config and getattr(provider, 'is_cli_provider', False):
+            provider_prefix = agent_config.provider.split("-")[0]  # claude, copilot, gemini
+
             def _stream_callback(event_type: str, data: dict) -> None:
                 if event_type == "text_delta":
                     text = data.get("text", "")
@@ -408,7 +410,7 @@ class AgentNodeExecutor(NodeExecutor):
 
                 tool_name = data.get("name", "unknown")
                 tool_input = data.get("input", {})
-                display_name = f"claude:{tool_name}"
+                display_name = f"{provider_prefix}:{tool_name}"
 
                 # Extract file path for display (Write/Edit/Read use file_path)
                 file_path = tool_input.get("file_path", tool_input.get("path", ""))
@@ -666,15 +668,16 @@ class AgentNodeExecutor(NodeExecutor):
 
         return retrieved_memory
 
-    def _emit_claude_code_file_changes(
+    def _emit_cli_file_changes(
         self,
         node: Node,
         response: ModelResponse,
         response_message: Message,
+        provider_name: str = "cli",
     ) -> None:
-        """Emit synthetic TOOL_CALL log entries for Claude Code file operations.
+        """Emit synthetic TOOL_CALL log entries for CLI provider file operations.
 
-        Claude Code uses its own built-in tools (Write, Edit, Bash) internally.
+        CLI providers use their own built-in tools (Write, Edit, Bash) internally.
         After execution, we inspect ``raw_response["file_changes"]`` (populated
         by the provider's workspace diff) and emit log entries so the UI shows
         tool activity and the log system records file operations.
@@ -709,6 +712,9 @@ class AgentNodeExecutor(NodeExecutor):
             "deleted": "Delete",
         }
 
+        display_prefix = provider_name.split("-")[0]  # claude, copilot, gemini
+        attachment_prefix = provider_name.replace("-", "_")  # claude_code, copilot_cli, gemini_cli
+
         for change in file_changes:
             path = change.get("path", "")
             change_type = change.get("change", "unknown")
@@ -720,7 +726,7 @@ class AgentNodeExecutor(NodeExecutor):
                 # Emit "before" stage to start the loading indicator in UI
                 self.log_manager.record_tool_call(
                     node.id,
-                    f"claude:{tool_name}",
+                    f"{display_prefix}:{tool_name}",
                     success=True,
                     tool_result=f"Starting {change_type} for: {path}",
                     details={
@@ -728,7 +734,7 @@ class AgentNodeExecutor(NodeExecutor):
                         "change_type": change_type,
                         "file_size": size,
                         "synthetic": True,
-                        "tool_name": f"claude:{tool_name}",
+                        "tool_name": f"{display_prefix}:{tool_name}",
                     },
                     stage=CallStage.BEFORE,
                 )
@@ -736,7 +742,7 @@ class AgentNodeExecutor(NodeExecutor):
                 # Emit "after" stage to complete the loading indicator
                 self.log_manager.record_tool_call(
                     node.id,
-                    f"claude:{tool_name}",
+                    f"{display_prefix}:{tool_name}",
                     success=True,
                     tool_result=f"File {change_type}: {path} ({size} bytes)",
                     details={
@@ -744,7 +750,7 @@ class AgentNodeExecutor(NodeExecutor):
                         "change_type": change_type,
                         "file_size": size,
                         "synthetic": True,
-                        "tool_name": f"claude:{tool_name}",
+                        "tool_name": f"{display_prefix}:{tool_name}",
                     },
                     stage=CallStage.AFTER,
                 )
@@ -777,7 +783,7 @@ class AgentNodeExecutor(NodeExecutor):
                         # Add attachment to message
                         attachment_ref = AttachmentRef(
                             name=file_path.name,
-                            attachment_id=f"claude_code_{node.id}_{path.replace('/', '_')}",
+                            attachment_id=f"{attachment_prefix}_{node.id}_{path.replace('/', '_')}",
                             mime_type=mime_type,
                             size=len(content),
                             data_uri=data_uri,
