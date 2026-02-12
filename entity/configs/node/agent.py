@@ -335,7 +335,7 @@ class AgentConfig(BaseConfig):
     persistent_session: bool = True  # Keep session alive across calls (claude-code only)
     skip_memory: bool = False  # Skip ChatDev memory system (claude-code manages its own)
     max_turns: int | None = None  # Max agentic turns for Claude Code CLI (overrides provider default)
-    idle_timeout: int | None = None  # Seconds of no output before stall detection (claude-code only, default 600s)
+    idle_timeout: int | None = None  # Seconds of no output before stall detection (claude-code only, default 900s)
 
     # Runtime attributes (attached dynamically)
     token_tracker: Any | None = field(default=None, init=False, repr=False)
@@ -562,7 +562,7 @@ class AgentConfig(BaseConfig):
             display_name="Idle Timeout",
             type_hint="int",
             required=False,
-            description="Seconds of no CLI output before stall detection triggers auto-recovery (claude-code only, default 600s, minimum 30s)",
+            description="Seconds of no CLI output before stall detection triggers auto-recovery (claude-code only, default 900s, minimum 30s)",
             advance=True,
         ),
     }
