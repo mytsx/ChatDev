@@ -335,6 +335,7 @@ class AgentConfig(BaseConfig):
     persistent_session: bool = True  # Keep session alive across calls (claude-code only)
     skip_memory: bool = False  # Skip ChatDev memory system (claude-code manages its own)
     max_turns: int | None = None  # Max agentic turns for Claude Code CLI (overrides provider default)
+    idle_timeout: int | None = None  # Seconds of no output before stall detection (claude-code only, default 600s)
 
     # Runtime attributes (attached dynamically)
     token_tracker: Any | None = field(default=None, init=False, repr=False)
@@ -408,6 +409,12 @@ class AgentConfig(BaseConfig):
         if max_turns_raw is not None:
             max_turns = _coerce_positive_int(max_turns_raw, field_path=extend_path(path, "max_turns"), minimum=1)
 
+        # Idle timeout for stall detection (claude-code only)
+        idle_timeout_raw = mapping.get("idle_timeout")
+        idle_timeout = None
+        if idle_timeout_raw is not None:
+            idle_timeout = _coerce_positive_int(idle_timeout_raw, field_path=extend_path(path, "idle_timeout"), minimum=30)
+
         return cls(
             provider=provider,
             base_url=base_url,
@@ -423,6 +430,7 @@ class AgentConfig(BaseConfig):
             persistent_session=persistent_session,
             skip_memory=skip_memory,
             max_turns=max_turns,
+            idle_timeout=idle_timeout,
             path=path,
         )
 
@@ -547,6 +555,14 @@ class AgentConfig(BaseConfig):
             type_hint="int",
             required=False,
             description="Maximum agentic turns for Claude Code CLI (overrides provider default of 30)",
+            advance=True,
+        ),
+        "idle_timeout": ConfigFieldSpec(
+            name="idle_timeout",
+            display_name="Idle Timeout",
+            type_hint="int",
+            required=False,
+            description="Seconds of no CLI output before stall detection triggers auto-recovery (claude-code only, default 600s, minimum 30s)",
             advance=True,
         ),
     }

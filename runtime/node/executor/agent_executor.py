@@ -333,6 +333,14 @@ class AgentNodeExecutor(NodeExecutor):
                         self.log_manager.record_agent_text(node.id, text)
                     return
 
+                if event_type == "stall_detected":
+                    idle_secs = data.get("idle_timeout", 0)
+                    self.log_manager.warning(
+                        f"Agent stalled for {idle_secs}s, resuming session...",
+                        node_id=node.id,
+                    )
+                    return
+
                 tool_name = data.get("name", "unknown")
                 tool_input = data.get("input", {})
                 display_name = f"claude:{tool_name}"
@@ -387,6 +395,11 @@ class AgentNodeExecutor(NodeExecutor):
             extra_kwargs["stream_callback"] = _stream_callback
             extra_kwargs["session_id"] = self.context.global_state.get("session_id", "")
             extra_kwargs["server_port"] = int(os.environ.get("CHATDEV_SERVER_PORT", "8000"))
+
+            # Forward idle_timeout from agent config to provider
+            configured_idle_timeout = getattr(agent_config, "idle_timeout", None)
+            if configured_idle_timeout:
+                extra_kwargs["idle_timeout"] = configured_idle_timeout
 
         def _call_provider() -> ModelResponse:
             merged = dict(call_options)

@@ -211,10 +211,12 @@ class ClaudeCodeProvider(ModelProvider):
         before_snapshot = self._snapshot_workspace(cwd) if cwd else {}
 
         timeout = kwargs.pop("timeout", 600)
+        idle_timeout = kwargs.pop("idle_timeout", 600)
 
         try:
             raw_response, stderr_text = self._run_streaming(
                 cmd, cwd, timeout, stream_callback,
+                idle_timeout=idle_timeout,
             )
 
             if raw_response.get("error") == "timeout":
@@ -227,6 +229,45 @@ class ClaudeCodeProvider(ModelProvider):
                     ),
                     raw_response=raw_response,
                 )
+
+            # Stall recovery: resume session when CLI produced no output
+            # for idle_timeout seconds (model API or CLI hung).
+            if raw_response.get("error") == "stall":
+                stall_session = raw_response.get("session_id") or (
+                    self.get_session(node_id) if node_id else None
+                )
+                if stall_session:
+                    if stream_callback:
+                        stream_callback("stall_detected", {
+                            "session_id": stall_session,
+                            "idle_timeout": idle_timeout,
+                        })
+
+                    raw_response, stderr_text = self._resume_after_stall(
+                        client, stall_session, cwd, timeout, stream_callback,
+                        mcp_config_path, idle_timeout=idle_timeout,
+                    )
+
+                    if raw_response.get("error") in ("timeout", "stall"):
+                        if node_id:
+                            self.clear_session(node_id)
+                        return ModelResponse(
+                            message=Message(
+                                role=MessageRole.ASSISTANT,
+                                content="[Error: Agent stalled and recovery failed]",
+                            ),
+                            raw_response=raw_response,
+                        )
+
+                    # Token usage tracked by the main _track_token_usage call below
+                else:
+                    return ModelResponse(
+                        message=Message(
+                            role=MessageRole.ASSISTANT,
+                            content="[Error: Agent stalled, no session to resume]",
+                        ),
+                        raw_response=raw_response,
+                    )
 
             self._track_token_usage(raw_response)
 
@@ -249,6 +290,7 @@ class ClaudeCodeProvider(ModelProvider):
 
                 raw_response, stderr_text = self._run_streaming(
                     cmd_retry, cwd, timeout, stream_callback,
+                    idle_timeout=idle_timeout,
                 )
 
                 if raw_response.get("error") == "timeout":
@@ -315,10 +357,16 @@ class ClaudeCodeProvider(ModelProvider):
         cwd: Optional[str],
         timeout: int,
         stream_callback: Optional[Any],
+        idle_timeout: int = 600,
     ) -> tuple:
         """Run Claude Code CLI with Popen, parse NDJSON stream in real time.
 
         Returns (raw_response_dict, stderr_text).
+
+        Parameters:
+            idle_timeout: Seconds of no NDJSON output before declaring a stall.
+                When triggered, the process is killed and ``{"error": "stall"}``
+                is returned so the caller can resume the session.
         """
         process = subprocess.Popen(
             cmd,
@@ -330,14 +378,23 @@ class ClaudeCodeProvider(ModelProvider):
         )
 
         timed_out = False
+        stalled = False
 
         def _kill():
             nonlocal timed_out
             timed_out = True
             process.kill()
 
+        def _kill_stall():
+            nonlocal stalled
+            stalled = True
+            process.kill()
+
         timer = threading.Timer(timeout, _kill)
         timer.start()
+
+        idle_timer = threading.Timer(idle_timeout, _kill_stall)
+        idle_timer.start()
 
         accumulated_text: List[str] = []
         session_id: Optional[str] = None
@@ -346,6 +403,10 @@ class ClaudeCodeProvider(ModelProvider):
 
         try:
             for line in process.stdout:
+                # Reset idle timer on every line (process is alive)
+                idle_timer.cancel()
+                idle_timer = threading.Timer(idle_timeout, _kill_stall)
+                idle_timer.start()
                 line = line.strip()
                 if not line:
                     continue
@@ -413,6 +474,7 @@ class ClaudeCodeProvider(ModelProvider):
 
         finally:
             timer.cancel()
+            idle_timer.cancel()
             process.wait()
 
         stderr_text = ""
@@ -423,6 +485,12 @@ class ClaudeCodeProvider(ModelProvider):
 
         if timed_out:
             return {"error": "timeout"}, stderr_text
+
+        if stalled:
+            return {
+                "error": "stall",
+                "session_id": session_id,
+            }, stderr_text
 
         # Build raw_response from stream data
         raw_response = self._parse_stream_result(
@@ -492,6 +560,45 @@ class ClaudeCodeProvider(ModelProvider):
             cmd.extend(["--model", self._model_flag])
 
         return self._run_streaming(cmd, cwd, timeout, stream_callback)
+
+    def _resume_after_stall(
+        self,
+        client: str,
+        session_id: str,
+        cwd: Optional[str],
+        timeout: int,
+        stream_callback: Optional[Any],
+        mcp_config_path: Optional[str],
+        idle_timeout: int = 600,
+    ) -> tuple:
+        """Resume session after a stall (idle timeout).
+
+        Called when the CLI process produced no output for idle_timeout seconds,
+        indicating the model API or CLI hung. Resumes the existing session so
+        the agent can continue where it left off.
+        """
+        resume_prompt = (
+            "Your previous session was interrupted due to inactivity. "
+            "Continue where you left off and complete your remaining work."
+        )
+        configured_turns = getattr(self.config, "max_turns", None)
+        cmd = [
+            client, "-p", resume_prompt,
+            "--output-format", "stream-json",
+            "--verbose",
+            "--dangerously-skip-permissions",
+            "--resume", session_id,
+            "--max-turns", str(configured_turns or 20),
+        ]
+        if mcp_config_path:
+            cmd.extend(["--mcp-config", mcp_config_path])
+        if self._model_flag:
+            cmd.extend(["--model", self._model_flag])
+
+        return self._run_streaming(
+            cmd, cwd, timeout, stream_callback,
+            idle_timeout=idle_timeout,
+        )
 
     def _build_stream_response(
         self, raw_response: dict, stderr_text: str,
