@@ -13,6 +13,8 @@ in real time.
 """
 
 import json
+import os
+import signal
 import subprocess
 import threading
 from typing import Any, Dict, List, Optional
@@ -153,20 +155,27 @@ class CopilotCliProvider(CliProviderBase):
             text=True,
             encoding="utf-8",
             cwd=cwd,
+            start_new_session=True,
         )
 
         timed_out = False
         stalled = False
 
+        def _kill_tree():
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+
         def _kill():
             nonlocal timed_out
             timed_out = True
-            process.kill()
+            _kill_tree()
 
         def _kill_stall():
             nonlocal stalled
             stalled = True
-            process.kill()
+            _kill_tree()
 
         timer = threading.Timer(timeout, _kill)
         timer.start()

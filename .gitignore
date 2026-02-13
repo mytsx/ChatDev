@@ -23,6 +23,9 @@ frontend/.vscode/
 # Environment
 .env
 
+# Claude Code
+.claude/settings.local.json
+
 # Project Specific
 logs/
 node_modules/

@@ -14,12 +14,15 @@ binary (Claude Code, Gemini CLI, Copilot CLI, etc.):
 """
 
 import json
+import logging
 import os
 import re
+import signal
 import subprocess
 import shutil
 import tempfile
 import threading
+import time
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +35,8 @@ from entity.tool_spec import ToolSpec
 from runtime.node.agent.providers.base import ModelProvider
 from runtime.node.agent.providers.response import ModelResponse
 from utils.token_tracker import TokenUsage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -393,20 +398,29 @@ class CliProviderBase(ModelProvider):
             text=True,
             encoding="utf-8",
             cwd=cwd,
+            start_new_session=True,
         )
 
         timed_out = False
         stalled = False
 
+        def _kill_tree():
+            """Kill the entire process group so child processes don't hold
+            the pipe open after the main process is killed."""
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+
         def _kill():
             nonlocal timed_out
             timed_out = True
-            process.kill()
+            _kill_tree()
 
         def _kill_stall():
             nonlocal stalled
             stalled = True
-            process.kill()
+            _kill_tree()
 
         timer = threading.Timer(timeout, _kill)
         timer.start()
@@ -418,14 +432,11 @@ class CliProviderBase(ModelProvider):
         session_id: Optional[str] = None
         result_data: dict = {}
         pending_tool: Optional[dict] = None
+        tool_start_time: Optional[float] = None
+        tool_call_timeout = idle_timeout  # same duration for stuck tool calls
 
         try:
             for line in process.stdout:
-                # Reset idle timer on every output line
-                idle_timer.cancel()
-                idle_timer = threading.Timer(idle_timeout, _kill_stall)
-                idle_timer.start()
-
                 line = line.strip()
                 if not line:
                     continue
@@ -435,6 +446,28 @@ class CliProviderBase(ModelProvider):
                     continue
 
                 normalized = self._normalize_event(event)
+
+                # Only reset idle timer on meaningful events (not empty text)
+                is_meaningful = not (
+                    normalized.type == "text" and not normalized.text
+                )
+                if is_meaningful:
+                    idle_timer.cancel()
+                    idle_timer = threading.Timer(idle_timeout, _kill_stall)
+                    idle_timer.start()
+
+                # Check tool-call timeout: if a single tool call runs too long
+                if tool_start_time and pending_tool:
+                    elapsed = time.time() - tool_start_time
+                    if elapsed > tool_call_timeout:
+                        logger.warning(
+                            "Tool call '%s' exceeded %ds, killing process",
+                            pending_tool.get("name", "unknown"),
+                            tool_call_timeout,
+                        )
+                        stalled = True
+                        process.kill()
+                        break
 
                 if normalized.type == "init":
                     session_id = normalized.session_id or session_id
@@ -448,6 +481,7 @@ class CliProviderBase(ModelProvider):
                     if pending_tool and stream_callback:
                         stream_callback("tool_end", pending_tool)
                         pending_tool = None
+                        tool_start_time = None
 
                 elif normalized.type == "tool_start":
                     if pending_tool and stream_callback:
@@ -457,10 +491,12 @@ class CliProviderBase(ModelProvider):
                         "input": normalized.tool_input or {},
                         "id": normalized.tool_id,
                     }
+                    tool_start_time = time.time()
                     if stream_callback:
                         stream_callback("tool_start", pending_tool)
 
                 elif normalized.type == "tool_end":
+                    tool_start_time = None
                     if pending_tool and stream_callback:
                         pending_tool["result"] = (
                             normalized.tool_result
@@ -471,6 +507,7 @@ class CliProviderBase(ModelProvider):
                         pending_tool = None
 
                 elif normalized.type == "result":
+                    tool_start_time = None
                     if pending_tool and stream_callback:
                         stream_callback("tool_end", pending_tool)
                         pending_tool = None
