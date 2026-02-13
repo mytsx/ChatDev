@@ -26,6 +26,9 @@ frontend/.vscode/
 # Claude Code
 .claude/settings.local.json
 
+# Gemini CLI
+.gemini/
+
 # Project Specific
 logs/
 node_modules/

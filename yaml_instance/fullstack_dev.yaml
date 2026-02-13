@@ -378,10 +378,8 @@ graph:
           - type: mcp_local
             prefix: oracle
             config:
-              command: "uvx"
-              args: ["oracle-mcp-server"]
-              env:
-                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
+              command: "$ENV{ORACLE_MCP_PYTHON}"
+              args: ["$ENV{ORACLE_MCP_SERVER}"]
 
     # ══════════════════════════════════════════════════════════════════
     # Phase 3: Plan Approval
@@ -539,10 +537,8 @@ graph:
           - type: mcp_local
             prefix: oracle
             config:
-              command: "uvx"
-              args: ["oracle-mcp-server"]
-              env:
-                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
+              command: "$ENV{ORACLE_MCP_PYTHON}"
+              args: ["$ENV{ORACLE_MCP_SERVER}"]
 
     - id: Frontend Developer
       type: agent
@@ -738,10 +734,8 @@ graph:
           - type: mcp_local
             prefix: oracle
             config:
-              command: "uvx"
-              args: ["oracle-mcp-server"]
-              env:
-                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
+              command: "$ENV{ORACLE_MCP_PYTHON}"
+              args: ["$ENV{ORACLE_MCP_SERVER}"]
 
     - id: Reviewer
       type: agent
@@ -1033,10 +1027,8 @@ graph:
           - type: mcp_local
             prefix: oracle
             config:
-              command: "uvx"
-              args: ["oracle-mcp-server"]
-              env:
-                ORACLE_CONNECTION_STRING: "$ENV{ORACLE_CONNECTION_STRING}"
+              command: "$ENV{ORACLE_MCP_PYTHON}"
+              args: ["$ENV{ORACLE_MCP_SERVER}"]
 
     - id: QA Counter
       type: loop_counter

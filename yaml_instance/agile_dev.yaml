@@ -327,6 +327,11 @@ graph:
             prefix: exa
             config:
               server: "https://mcp.exa.ai/mcp?exaApiKey=$ENV{EXA_API_KEY}"
+          - type: mcp_local
+            prefix: oracle
+            config:
+              command: "$ENV{ORACLE_MCP_PYTHON}"
+              args: ["$ENV{ORACLE_MCP_SERVER}"]
 
     # ══════════════════════════════════════════════════════════════════
     # Phase 3: Plan Approval
@@ -496,6 +501,11 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@gscalzo/stackoverflow-mcp"]
+          - type: mcp_local
+            prefix: oracle
+            config:
+              command: "$ENV{ORACLE_MCP_PYTHON}"
+              args: ["$ENV{ORACLE_MCP_SERVER}"]
 
     # ══════════════════════════════════════════════════════════════════
     # Phase 5: Code Review + Security Audit
@@ -786,6 +796,11 @@ graph:
             config:
               command: "npx"
               args: ["-y", "@modelcontextprotocol/server-filesystem", "$ENV{WORKSPACE_ROOT}"]
+          - type: mcp_local
+            prefix: oracle
+            config:
+              command: "$ENV{ORACLE_MCP_PYTHON}"
+              args: ["$ENV{ORACLE_MCP_SERVER}"]
 
     - id: QA Counter
       type: loop_counter
