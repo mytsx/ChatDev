@@ -1,7 +1,7 @@
 """Node config conveniences."""
 
 from .agent import AgentConfig, AgentRetryConfig
-from .hooks import AgentHooksConfig, HookHandler, HookMatcher
+from .hooks import AgentHooksConfig, HookHandler, HookMatcher, SubAgentConfig
 from .human import HumanConfig
 from .subgraph import SubgraphConfig
 from .passthrough import PassthroughConfig
@@ -15,6 +15,7 @@ __all__ = [
     "AgentRetryConfig",
     "HookHandler",
     "HookMatcher",
+    "SubAgentConfig",
     "HumanConfig",
     "SubgraphConfig",
     "PassthroughConfig",

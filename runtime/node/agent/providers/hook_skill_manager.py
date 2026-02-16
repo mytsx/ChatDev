@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from entity.configs.node.hooks import AgentHooksConfig, HookHandler, HookMatcher, HOOK_EVENTS
+from entity.configs.node.hooks import AgentHooksConfig, HookHandler, HookMatcher, SubAgentConfig, HOOK_EVENTS
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ class GeneratedFiles:
     instruction_path: Optional[str] = None
     instruction_was_created: bool = False  # True = we created it, cleanup should remove
     copilot_hook_files: List[str] = field(default_factory=list)  # Copilot uses separate files
+    sub_agent_files: List[str] = field(default_factory=list)  # Sub-agent MD files we created
 
 
 class HookSkillManager:
@@ -59,8 +60,9 @@ class HookSkillManager:
         instructions_file: Optional[str],
         workspace_dir: str,
         node_id: str,
+        sub_agents: Optional[List[SubAgentConfig]] = None,
     ) -> GeneratedFiles:
-        """Generate provider-specific hook config and instruction files.
+        """Generate provider-specific hook config, instruction, and sub-agent files.
 
         Args:
             provider_type: Provider name ("claude-code", "gemini-cli", "copilot-cli")
@@ -68,6 +70,7 @@ class HookSkillManager:
             instructions_file: Path to source instruction MD file (or None)
             workspace_dir: Agent workspace directory
             node_id: Node ID for namespacing
+            sub_agents: List of sub-agent configs to deploy (or None)
 
         Returns:
             GeneratedFiles tracking what was created for cleanup.
@@ -97,6 +100,12 @@ class HookSkillManager:
                 files = self._generate_copilot_hooks(hooks_config, workspace_dir)
                 result.copilot_hook_files = files
 
+        # 3. Sub-agent files
+        if sub_agents:
+            result.sub_agent_files = self._generate_sub_agents(
+                provider_type, sub_agents, workspace_dir
+            )
+
         return result
 
     def cleanup(self, files: GeneratedFiles) -> None:
@@ -115,6 +124,13 @@ class HookSkillManager:
 
         # Remove copilot hook files
         for path in files.copilot_hook_files:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+        # Remove sub-agent files we created
+        for path in files.sub_agent_files:
             try:
                 os.remove(path)
             except OSError:
@@ -384,6 +400,161 @@ class HookSkillManager:
 
         entry["timeoutSec"] = handler.timeout or 30
         return entry
+
+    # ------------------------------------------------------------------
+    # Sub-agent file generation
+    # ------------------------------------------------------------------
+
+    def _generate_sub_agents(
+        self, provider_type: str, sub_agents: List[SubAgentConfig], workspace_dir: str
+    ) -> List[str]:
+        """Generate sub-agent MD files in the provider-specific directory.
+
+        Returns list of file paths that were created (for cleanup).
+        """
+        created: List[str] = []
+        for agent_cfg in sub_agents:
+            source_path = self._resolve_instructions_source(agent_cfg.source, workspace_dir)
+            if not source_path or not os.path.isfile(source_path):
+                logger.warning(
+                    "Sub-agent source not found: %s (agent: %s)", agent_cfg.source, agent_cfg.name
+                )
+                continue
+
+            target = self._get_sub_agent_target(provider_type, workspace_dir, agent_cfg.name)
+            if os.path.exists(target):
+                logger.info("Sub-agent file already exists, preserving: %s", target)
+                continue
+
+            try:
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                content = self._read_file(source_path)
+                # Transform frontmatter for the target provider
+                transformed = self._transform_sub_agent_content(provider_type, content, agent_cfg)
+                with open(target, "w") as f:
+                    f.write(transformed)
+                created.append(target)
+                logger.debug("Created sub-agent file: %s", target)
+            except OSError as e:
+                logger.warning("Failed to create sub-agent file %s: %s", target, e)
+
+        if created:
+            logger.debug("Generated %d sub-agent files for %s", len(created), provider_type)
+        return created
+
+    @staticmethod
+    def _get_sub_agent_target(provider_type: str, workspace_dir: str, name: str) -> str:
+        """Get provider-specific sub-agent file path."""
+        if provider_type == "claude-code":
+            return os.path.join(workspace_dir, ".claude", "agents", f"{name}.md")
+        elif provider_type == "gemini-cli":
+            return os.path.join(workspace_dir, ".gemini", "agents", f"{name}.md")
+        elif provider_type == "copilot-cli":
+            return os.path.join(workspace_dir, ".github", "agents", f"{name}.md")
+        else:
+            return os.path.join(workspace_dir, ".chatdev", "agents", f"{name}.md")
+
+    def _transform_sub_agent_content(
+        self, provider_type: str, content: str, agent_cfg: SubAgentConfig
+    ) -> str:
+        """Transform sub-agent MD content for the target provider.
+
+        The source files use a generic YAML frontmatter. This method rewrites
+        the frontmatter to match what each CLI provider expects.
+        """
+        # Parse frontmatter and body
+        frontmatter, body = self._split_frontmatter(content)
+
+        if provider_type == "claude-code":
+            return self._format_claude_sub_agent(frontmatter, body, agent_cfg)
+        elif provider_type == "gemini-cli":
+            return self._format_gemini_sub_agent(frontmatter, body, agent_cfg)
+        elif provider_type == "copilot-cli":
+            return self._format_copilot_sub_agent(frontmatter, body, agent_cfg)
+        else:
+            return content  # Passthrough
+
+    @staticmethod
+    def _split_frontmatter(content: str) -> tuple:
+        """Split YAML frontmatter from markdown body.
+
+        Returns (frontmatter_dict, body_str).
+        """
+        import yaml
+
+        if not content.startswith("---"):
+            return {}, content
+
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return {}, content
+
+        try:
+            fm = yaml.safe_load(parts[1]) or {}
+        except Exception:
+            fm = {}
+        body = parts[2].lstrip("\n")
+        return fm, body
+
+    @staticmethod
+    def _format_claude_sub_agent(fm: dict, body: str, cfg: SubAgentConfig) -> str:
+        """Format for Claude Code: .claude/agents/{name}.md"""
+        lines = ["---"]
+        lines.append(f"name: {fm.get('name', cfg.name)}")
+        lines.append(f"description: {fm.get('description', cfg.description)}")
+        # Claude uses comma-separated tool names
+        tools = fm.get("tools", [])
+        if isinstance(tools, list):
+            lines.append(f"tools: {', '.join(tools)}")
+        lines.append("---")
+        lines.append("")
+        lines.append(body)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_gemini_sub_agent(fm: dict, body: str, cfg: SubAgentConfig) -> str:
+        """Format for Gemini CLI: .gemini/agents/{name}.md"""
+        # Gemini tool name mapping
+        tool_map = {
+            "Read": "read_file",
+            "Grep": "grep_search",
+            "Glob": "list_directory",
+            "Write": "write_file",
+            "Edit": "edit_file",
+            "WebFetch": "web_fetch",
+            "WebSearch": "web_search",
+        }
+        lines = ["---"]
+        lines.append(f"name: {fm.get('name', cfg.name)}")
+        lines.append(f"description: {fm.get('description', cfg.description)}")
+        tools = fm.get("tools", [])
+        if isinstance(tools, list):
+            gemini_tools = [tool_map.get(t, t) for t in tools]
+            lines.append(f"tools: [{', '.join(gemini_tools)}]")
+        lines.append("---")
+        lines.append("")
+        lines.append(body)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_copilot_sub_agent(fm: dict, body: str, cfg: SubAgentConfig) -> str:
+        """Format for Copilot CLI: .github/agents/{name}.md"""
+        lines = ["---"]
+        lines.append(f"name: {fm.get('name', cfg.name)}")
+        lines.append(f"description: {fm.get('description', cfg.description)}")
+        tools = fm.get("tools", [])
+        if isinstance(tools, list):
+            lines.append(f"tools: {', '.join(tools)}")
+        lines.append("---")
+        lines.append("")
+        lines.append(body)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _read_file(path: str) -> str:
+        """Read file content as string."""
+        with open(path) as f:
+            return f.read()
 
     # ------------------------------------------------------------------
     # Utility helpers

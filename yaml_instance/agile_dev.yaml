@@ -157,6 +157,10 @@ graph:
         name: opus
         skip_memory: true
         max_turns: 50
+        sub_agents:
+          - name: tech-researcher
+            description: Research and compare frameworks, libraries, and verify version compatibility
+            source: .chatdev/workflows/agile_dev/agents/tech-researcher.md
         role: |
           ═══ SCOPE EVALUATION (do this FIRST) ═══
 
@@ -299,6 +303,11 @@ graph:
           - Error handling with structured responses
           - No hardcoded secrets or URLs
 
+          ═══ SUB-AGENTS ═══
+
+          You have access to a specialized sub-agent:
+          - **tech-researcher**: Before choosing a framework or library, delegate comparison research to this agent. It will compare alternatives, check version compatibility, assess community health, and verify license compliance.
+
           CONSTRAINTS:
           - Do NOT propose technologies without verifying via Context7/DeepWiki
           - Every API endpoint MUST define error responses, not just success
@@ -369,6 +378,13 @@ graph:
         skip_memory: true
         max_turns: 50
         instructions_file: .chatdev/workflows/agile_dev/instructions/developer.md
+        sub_agents:
+          - name: code-researcher
+            description: Research API docs, framework documentation, and verify correct usage before coding
+            source: .chatdev/workflows/agile_dev/agents/code-researcher.md
+          - name: test-writer
+            description: Generate unit tests for the code you have written
+            source: .chatdev/workflows/agile_dev/agents/test-writer.md
         hooks:
           Stop:
             - hooks:
@@ -469,6 +485,12 @@ graph:
           - **NO HARDCODED SECRETS**: Environment variables for ALL configuration.
           - Follow existing project conventions if codebase already exists.
 
+          ═══ SUB-AGENTS ═══
+
+          You have access to specialized sub-agents. Use them when appropriate:
+          - **code-researcher**: Before using any library/framework API, delegate research to this agent. It will verify correct API usage, check for deprecations, and return documentation references.
+          - **test-writer**: After implementing a feature or function, delegate test writing to this agent. It will generate comprehensive unit tests covering happy paths, edge cases, and error conditions.
+
           OUTPUT: Concise summary of implemented files, endpoints, and components with file paths.
         tooling:
           - type: function
@@ -529,6 +551,13 @@ graph:
         skip_memory: true
         max_turns: 40
         instructions_file: .chatdev/workflows/agile_dev/instructions/reviewer.md
+        sub_agents:
+          - name: security-scanner
+            description: OWASP Top 10 focused security scanning of source code
+            source: .chatdev/workflows/agile_dev/agents/security-scanner.md
+          - name: complexity-analyzer
+            description: Analyze code complexity including function length, nesting depth, and cyclomatic complexity
+            source: .chatdev/workflows/agile_dev/agents/complexity-analyzer.md
         hooks:
           PreToolUse:
             - matcher: "Edit|Write|Bash"
@@ -647,6 +676,12 @@ graph:
           - 3+ P2 findings → REVIEW_FAIL
           - P3 only → REVIEW_PASS (note improvements)
 
+          ═══ SUB-AGENTS ═══
+
+          You have access to specialized sub-agents. Use them when appropriate:
+          - **security-scanner**: Delegate OWASP Top 10 scanning to this agent. It will systematically scan all source files for injection, auth, XSS, and other vulnerabilities.
+          - **complexity-analyzer**: Delegate complexity analysis to this agent. It will measure function length, nesting depth, cyclomatic complexity, and flag violations.
+
           CONSTRAINTS:
           - You MUST output either REVIEW_PASS or REVIEW_FAIL — no ambiguous verdicts
           - Every finding MUST include the exact file and line number
@@ -690,6 +725,13 @@ graph:
         skip_memory: true
         max_turns: 45
         instructions_file: .chatdev/workflows/agile_dev/instructions/qa-engineer.md
+        sub_agents:
+          - name: test-generator
+            description: Generate edge case test scenarios from requirements and write test files
+            source: .chatdev/workflows/agile_dev/agents/test-generator.md
+          - name: bug-analyzer
+            description: Analyze test failures to identify root causes and suggest minimal fixes
+            source: .chatdev/workflows/agile_dev/agents/bug-analyzer.md
         hooks:
           Stop:
             - hooks:
@@ -795,6 +837,12 @@ graph:
           - Automated test suite written and passing → prerequisites for PASS
           - Any P1 bug unfixable → QA_FAIL
           - All bugs fixed and tests green → QA_PASS
+
+          ═══ SUB-AGENTS ═══
+
+          You have access to specialized sub-agents. Use them when appropriate:
+          - **test-generator**: Delegate edge case test generation to this agent. Give it the requirements (FR-N list) and it will generate comprehensive test scenarios including boundary values, error conditions, and state transitions.
+          - **bug-analyzer**: When a test fails and you can't immediately identify the root cause, delegate analysis to this agent. It will trace the execution path and identify the exact root cause.
 
           CONSTRAINTS:
           - You MUST output either QA_PASS or QA_FAIL
@@ -996,6 +1044,10 @@ graph:
         skip_memory: true
         max_turns: 25
         instructions_file: .chatdev/workflows/agile_dev/instructions/technical-writer.md
+        sub_agents:
+          - name: api-documenter
+            description: Extract and document API endpoints from source code
+            source: .chatdev/workflows/agile_dev/agents/api-documenter.md
         hooks:
           PreToolUse:
             - matcher: "Edit|Write"
@@ -1073,6 +1125,11 @@ graph:
 
              ## Next Steps
              - [Recommended improvements for future iterations]
+
+          ═══ SUB-AGENTS ═══
+
+          You have access to a specialized sub-agent:
+          - **api-documenter**: Delegate API documentation extraction to this agent. It will scan source code for endpoint definitions and generate formatted API docs with methods, paths, parameters, and example curl commands.
 
           CONSTRAINTS:
           - README must be complete enough for a new developer to set up and run the project

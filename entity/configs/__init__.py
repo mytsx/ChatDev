@@ -15,7 +15,7 @@ from .node.memory import (
     SimpleMemoryConfig,
 )
 from .node.agent import AgentConfig, AgentRetryConfig
-from .node.hooks import AgentHooksConfig, HookHandler, HookMatcher
+from .node.hooks import AgentHooksConfig, HookHandler, HookMatcher, SubAgentConfig
 from .node.human import HumanConfig
 from .node.subgraph import SubgraphConfig
 from .node.node import EdgeLink, Node
@@ -50,6 +50,7 @@ __all__ = [
     "Node",
     "PassthroughConfig",
     "PythonRunnerConfig",
+    "SubAgentConfig",
     "SubgraphConfig",
     "ThinkingConfig",
     "ToolingConfig",

@@ -7,7 +7,7 @@ import shutil
 
 import pytest
 
-from entity.configs.node.hooks import AgentHooksConfig, HookHandler, HookMatcher
+from entity.configs.node.hooks import AgentHooksConfig, HookHandler, HookMatcher, SubAgentConfig
 from runtime.node.agent.providers.hook_skill_manager import (
     GeneratedFiles,
     HookSkillManager,
@@ -547,3 +547,269 @@ class TestCombined:
         assert result.hook_config_path is not None
         # Instructions should be skipped
         assert result.instruction_was_created is False
+
+
+# ──────────────────────────────────────────────────────────────────
+# Sub-Agent Configuration Schema
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestSubAgentConfig:
+    def test_from_dict_valid(self):
+        data = {
+            "name": "code-researcher",
+            "description": "Research API docs",
+            "source": ".chatdev/workflows/agile_dev/agents/code-researcher.md",
+        }
+        cfg = SubAgentConfig.from_dict(data, path="test")
+        assert cfg.name == "code-researcher"
+        assert cfg.description == "Research API docs"
+        assert cfg.source.endswith("code-researcher.md")
+
+    def test_from_dict_missing_name(self):
+        data = {"description": "Test", "source": "test.md"}
+        with pytest.raises(Exception):
+            SubAgentConfig.from_dict(data, path="test")
+
+    def test_from_dict_missing_description(self):
+        data = {"name": "test", "source": "test.md"}
+        with pytest.raises(Exception):
+            SubAgentConfig.from_dict(data, path="test")
+
+    def test_from_dict_missing_source(self):
+        data = {"name": "test", "description": "Test"}
+        with pytest.raises(Exception):
+            SubAgentConfig.from_dict(data, path="test")
+
+
+# ──────────────────────────────────────────────────────────────────
+# Sub-Agent File Generation — Fixtures
+# ──────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def sub_agent_source(tmp_path):
+    """Create a sub-agent source MD file with YAML frontmatter."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    md_file = agents_dir / "code-researcher.md"
+    md_file.write_text(
+        "---\n"
+        "name: code-researcher\n"
+        "description: Research API docs\n"
+        "tools:\n"
+        "  - Read\n"
+        "  - Grep\n"
+        "  - Glob\n"
+        "---\n\n"
+        "# Code Researcher\n\n"
+        "You are a research-only assistant.\n"
+    )
+    return str(md_file)
+
+
+@pytest.fixture
+def sample_sub_agents(sub_agent_source):
+    """A list of SubAgentConfig pointing to the temp source file."""
+    return [
+        SubAgentConfig(
+            name="code-researcher",
+            description="Research API docs",
+            source=sub_agent_source,
+            path="test",
+        ),
+    ]
+
+
+# ──────────────────────────────────────────────────────────────────
+# Sub-Agent File Generation — Claude Code
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestSubAgentClaude:
+    def test_generates_claude_agent_file(self, manager, workspace, sample_sub_agents):
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        assert len(result.sub_agent_files) == 1
+        path = result.sub_agent_files[0]
+        assert ".claude/agents/code-researcher.md" in path
+        assert os.path.exists(path)
+
+        content = open(path).read()
+        assert "name: code-researcher" in content
+        assert "tools: Read, Grep, Glob" in content
+        assert "# Code Researcher" in content
+
+    def test_preserves_existing_agent_file(self, manager, workspace, sample_sub_agents):
+        # Pre-create the target file
+        target_dir = os.path.join(workspace, ".claude", "agents")
+        os.makedirs(target_dir, exist_ok=True)
+        target = os.path.join(target_dir, "code-researcher.md")
+        with open(target, "w") as f:
+            f.write("# My Custom Agent\n")
+
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        # Should NOT create (file existed)
+        assert len(result.sub_agent_files) == 0
+
+        # Original preserved
+        with open(target) as f:
+            assert "My Custom Agent" in f.read()
+
+    def test_cleanup_removes_created_agent(self, manager, workspace, sample_sub_agents):
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        assert os.path.exists(result.sub_agent_files[0])
+        manager.cleanup(result)
+        assert not os.path.exists(result.sub_agent_files[0])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Sub-Agent File Generation — Gemini CLI
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestSubAgentGemini:
+    def test_generates_gemini_agent_file(self, manager, workspace, sample_sub_agents):
+        result = manager.generate(
+            provider_type="gemini-cli",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        assert len(result.sub_agent_files) == 1
+        path = result.sub_agent_files[0]
+        assert ".gemini/agents/code-researcher.md" in path
+        assert os.path.exists(path)
+
+        content = open(path).read()
+        assert "name: code-researcher" in content
+        # Gemini uses different tool names
+        assert "read_file" in content
+        assert "grep_search" in content
+
+    def test_cleanup_removes_gemini_agent(self, manager, workspace, sample_sub_agents):
+        result = manager.generate(
+            provider_type="gemini-cli",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        assert os.path.exists(result.sub_agent_files[0])
+        manager.cleanup(result)
+        assert not os.path.exists(result.sub_agent_files[0])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Sub-Agent File Generation — Copilot CLI
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestSubAgentCopilot:
+    def test_generates_copilot_agent_file(self, manager, workspace, sample_sub_agents):
+        result = manager.generate(
+            provider_type="copilot-cli",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        assert len(result.sub_agent_files) == 1
+        path = result.sub_agent_files[0]
+        assert ".github/agents/code-researcher.md" in path
+        assert os.path.exists(path)
+
+        content = open(path).read()
+        assert "name: code-researcher" in content
+        assert "# Code Researcher" in content
+
+    def test_preserves_existing_copilot_agent(self, manager, workspace, sample_sub_agents):
+        target_dir = os.path.join(workspace, ".github", "agents")
+        os.makedirs(target_dir, exist_ok=True)
+        target = os.path.join(target_dir, "code-researcher.md")
+        with open(target, "w") as f:
+            f.write("# Existing Copilot Agent\n")
+
+        result = manager.generate(
+            provider_type="copilot-cli",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        assert len(result.sub_agent_files) == 0
+        with open(target) as f:
+            assert "Existing Copilot Agent" in f.read()
+
+
+# ──────────────────────────────────────────────────────────────────
+# Sub-Agent + Hooks Combined
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestSubAgentCombined:
+    def test_sub_agents_with_hooks_and_instructions(
+        self, manager, workspace, sample_hooks_config, instruction_file, sample_sub_agents
+    ):
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=sample_hooks_config,
+            instructions_file=instruction_file,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        # All three should work together
+        assert result.hook_config_path is not None
+        assert result.instruction_was_created is True
+        assert len(result.sub_agent_files) == 1
+
+        # Cleanup all
+        manager.cleanup(result)
+        assert not os.path.exists(result.hook_config_path)
+        assert not os.path.exists(result.instruction_path)
+        assert not os.path.exists(result.sub_agent_files[0])
+
+    def test_nonexistent_source_skipped(self, manager, workspace):
+        bad_agents = [
+            SubAgentConfig(
+                name="ghost-agent",
+                description="This source does not exist",
+                source="/nonexistent/ghost.md",
+                path="test",
+            ),
+        ]
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=bad_agents,
+        )
+        assert len(result.sub_agent_files) == 0

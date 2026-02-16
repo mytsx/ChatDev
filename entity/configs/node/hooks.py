@@ -1,7 +1,8 @@
-"""Hook configuration dataclasses for CLI provider agents.
+"""Hook and sub-agent configuration dataclasses for CLI provider agents.
 
-Defines a provider-agnostic hook schema that HookSkillManager translates
-into provider-specific formats (Claude Code, Gemini CLI, Copilot CLI).
+Defines a provider-agnostic hook schema and sub-agent definitions that
+HookSkillManager translates into provider-specific formats
+(Claude Code, Gemini CLI, Copilot CLI).
 """
 
 from dataclasses import dataclass, field
@@ -236,4 +237,74 @@ class AgentHooksConfig(BaseConfig):
         return any(
             getattr(self, event_name)
             for event_name in HOOK_EVENTS
+        )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Sub-Agent Configuration
+# ──────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class SubAgentConfig(BaseConfig):
+    """Definition of a sub-agent that a CLI provider exposes as a tool.
+
+    Each CLI provider discovers sub-agent MD files from specific directories:
+    - Claude Code: ``.claude/agents/{name}.md``
+    - Gemini CLI: ``.gemini/agents/{name}.md``
+    - Copilot CLI: ``.github/agents/{name}.md``
+
+    The ``source`` field points to a template MD file under
+    ``.chatdev/workflows/`` that HookSkillManager copies to the right location.
+    """
+
+    name: str = ""  # "code-researcher" (lowercase, hyphens)
+    description: str = ""  # Short description for the agent
+    source: str = ""  # Path to template MD file (.chatdev/workflows/agile_dev/agents/code-researcher.md)
+
+    FIELD_SPECS = {
+        "name": ConfigFieldSpec(
+            name="name",
+            display_name="Sub-Agent Name",
+            type_hint="str",
+            required=True,
+            description="Unique name for the sub-agent (lowercase, hyphens, e.g. 'code-researcher')",
+        ),
+        "description": ConfigFieldSpec(
+            name="description",
+            display_name="Description",
+            type_hint="str",
+            required=True,
+            description="Short description of the sub-agent's purpose",
+        ),
+        "source": ConfigFieldSpec(
+            name="source",
+            display_name="Source File",
+            type_hint="str",
+            required=True,
+            description="Path to the template MD file (relative to project root)",
+        ),
+    }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any], *, path: str) -> "SubAgentConfig":
+        mapping = require_mapping(data, path)
+
+        name = optional_str(mapping, "name", path) or ""
+        if not name:
+            raise ConfigError("sub-agent name is required", extend_path(path, "name"))
+
+        description = optional_str(mapping, "description", path) or ""
+        if not description:
+            raise ConfigError("sub-agent description is required", extend_path(path, "description"))
+
+        source = optional_str(mapping, "source", path) or ""
+        if not source:
+            raise ConfigError("sub-agent source file is required", extend_path(path, "source"))
+
+        return cls(
+            name=name,
+            description=description,
+            source=source,
+            path=path,
         )

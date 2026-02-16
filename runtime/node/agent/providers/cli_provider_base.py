@@ -230,11 +230,12 @@ class CliProviderBase(ModelProvider):
         existing_session = self.get_session(node_id) if node_id else None
         is_continuation = existing_session is not None
 
-        # Hook & instruction file generation
+        # Hook, instruction file, and sub-agent generation
         generated_files: Optional[GeneratedFiles] = None
         hooks_cfg = getattr(self.config, "hooks", None)
         instr_file = getattr(self.config, "instructions_file", None)
-        if (hooks_cfg or instr_file) and workspace_root:
+        sub_agents_cfg = getattr(self.config, "sub_agents", None) or []
+        if (hooks_cfg or instr_file or sub_agents_cfg) and workspace_root:
             hook_manager = HookSkillManager()
             generated_files = hook_manager.generate(
                 provider_type=self.PROVIDER_NAME,
@@ -242,6 +243,7 @@ class CliProviderBase(ModelProvider):
                 instructions_file=instr_file,
                 workspace_dir=str(workspace_root),
                 node_id=node_id or "unknown",
+                sub_agents=sub_agents_cfg if sub_agents_cfg else None,
             )
 
         tooling_configs = getattr(self.config, "tooling", None) or []

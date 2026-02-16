@@ -24,7 +24,7 @@ from entity.configs.base import (
     require_str,
     extend_path,
 )
-from .hooks import AgentHooksConfig
+from .hooks import AgentHooksConfig, SubAgentConfig
 from .memory import MemoryAttachmentConfig
 from .thinking import ThinkingConfig
 from entity.configs.node.tooling import ToolingConfig
@@ -339,6 +339,7 @@ class AgentConfig(BaseConfig):
     idle_timeout: int | None = None  # Seconds of no output before stall detection (CLI providers, default 900s)
     hooks: AgentHooksConfig | None = None  # Hook definitions for CLI providers
     instructions_file: str | None = None  # Path to instruction MD file (.chatdev/workflows/...)
+    sub_agents: List[SubAgentConfig] = field(default_factory=list)  # Sub-agent definitions for CLI providers
 
     # Runtime attributes (attached dynamically)
     token_tracker: Any | None = field(default=None, init=False, repr=False)
@@ -426,6 +427,17 @@ class AgentConfig(BaseConfig):
         # Instructions file path
         instructions_file = optional_str(mapping, "instructions_file", path)
 
+        # Sub-agent definitions (CLI providers)
+        sub_agents_cfg: List[SubAgentConfig] = []
+        if "sub_agents" in mapping and mapping["sub_agents"] is not None:
+            raw_sub_agents = mapping["sub_agents"]
+            if not isinstance(raw_sub_agents, list):
+                raise ConfigError("sub_agents must be a list", extend_path(path, "sub_agents"))
+            for idx, item in enumerate(raw_sub_agents):
+                sub_agents_cfg.append(
+                    SubAgentConfig.from_dict(item, path=extend_path(path, f"sub_agents[{idx}]"))
+                )
+
         return cls(
             provider=provider,
             base_url=base_url,
@@ -444,6 +456,7 @@ class AgentConfig(BaseConfig):
             idle_timeout=idle_timeout,
             hooks=hooks_cfg,
             instructions_file=instructions_file,
+            sub_agents=sub_agents_cfg,
             path=path,
         )
 
@@ -593,6 +606,15 @@ class AgentConfig(BaseConfig):
             type_hint="str",
             required=False,
             description="Path to instruction MD file that gets loaded into the agent's context",
+            advance=True,
+        ),
+        "sub_agents": ConfigFieldSpec(
+            name="sub_agents",
+            display_name="Sub-Agents",
+            type_hint="list[SubAgentConfig]",
+            required=False,
+            description="Sub-agent definitions that CLI providers expose as tools (code-researcher, test-writer, etc.)",
+            child=SubAgentConfig,
             advance=True,
         ),
     }
