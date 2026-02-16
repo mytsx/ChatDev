@@ -368,6 +368,15 @@ graph:
         name: opus
         skip_memory: true
         max_turns: 50
+        instructions_file: .chatdev/workflows/agile_dev/instructions/developer.md
+        hooks:
+          Stop:
+            - hooks:
+                - type: prompt
+                  prompt: |
+                    Check if the output includes: 1) list of files created/modified, 2) no TODO/FIXME placeholders left in code.
+                    If either is missing, respond with a description of what's missing.
+                    $ARGUMENTS
         role: |
           ═══ SCOPE BOUNDARY ═══
 
@@ -519,6 +528,20 @@ graph:
         name: opus
         skip_memory: true
         max_turns: 40
+        instructions_file: .chatdev/workflows/agile_dev/instructions/reviewer.md
+        hooks:
+          PreToolUse:
+            - matcher: "Edit|Write|Bash"
+              hooks:
+                - type: command
+                  command: "bash .chatdev/hooks/read-only-guard.sh"
+          Stop:
+            - hooks:
+                - type: prompt
+                  prompt: |
+                    Check if the output contains exactly one of: REVIEW_PASS or REVIEW_FAIL.
+                    If neither is present, respond {"ok": false, "reason": "Must output REVIEW_PASS or REVIEW_FAIL verdict"}.
+                    $ARGUMENTS
         role: |
           ═══ SCOPE BOUNDARY ═══
 
@@ -666,6 +689,15 @@ graph:
         name: sonnet
         skip_memory: true
         max_turns: 45
+        instructions_file: .chatdev/workflows/agile_dev/instructions/qa-engineer.md
+        hooks:
+          Stop:
+            - hooks:
+                - type: prompt
+                  prompt: |
+                    Check if the output contains QA_PASS or QA_FAIL and a test results summary.
+                    If neither verdict is present, respond {"ok": false, "reason": "Must output QA_PASS or QA_FAIL verdict"}.
+                    $ARGUMENTS
         role: |
           ═══ SCOPE BOUNDARY ═══
 
@@ -823,6 +855,7 @@ graph:
         name: sonnet
         skip_memory: true
         max_turns: 35
+        instructions_file: .chatdev/workflows/agile_dev/instructions/devops.md
         role: |
           ═══ SCOPE EVALUATION (do this FIRST) ═══
 
@@ -962,6 +995,13 @@ graph:
         name: haiku
         skip_memory: true
         max_turns: 25
+        instructions_file: .chatdev/workflows/agile_dev/instructions/technical-writer.md
+        hooks:
+          PreToolUse:
+            - matcher: "Edit|Write"
+              hooks:
+                - type: command
+                  command: "bash .chatdev/hooks/doc-only-guard.sh"
         role: |
           ═══ SCOPE EVALUATION (do this FIRST) ═══
 

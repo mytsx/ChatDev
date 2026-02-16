@@ -33,6 +33,7 @@ from entity.configs.node.tooling import McpLocalConfig, McpRemoteConfig, Tooling
 from entity.messages import Message, MessageRole
 from entity.tool_spec import ToolSpec
 from runtime.node.agent.providers.base import ModelProvider
+from runtime.node.agent.providers.hook_skill_manager import GeneratedFiles, HookSkillManager
 from runtime.node.agent.providers.response import ModelResponse
 from utils.token_tracker import TokenUsage
 
@@ -229,6 +230,20 @@ class CliProviderBase(ModelProvider):
         existing_session = self.get_session(node_id) if node_id else None
         is_continuation = existing_session is not None
 
+        # Hook & instruction file generation
+        generated_files: Optional[GeneratedFiles] = None
+        hooks_cfg = getattr(self.config, "hooks", None)
+        instr_file = getattr(self.config, "instructions_file", None)
+        if (hooks_cfg or instr_file) and workspace_root:
+            hook_manager = HookSkillManager()
+            generated_files = hook_manager.generate(
+                provider_type=self.PROVIDER_NAME,
+                hooks_config=hooks_cfg,
+                instructions_file=instr_file,
+                workspace_dir=str(workspace_root),
+                node_id=node_id or "unknown",
+            )
+
         tooling_configs = getattr(self.config, "tooling", None) or []
         mcp_config_path = self._create_mcp_config(
             node_id or "", session_id, server_port,
@@ -374,6 +389,11 @@ class CliProviderBase(ModelProvider):
             return self._build_stream_response(raw_response, stderr_text)
         finally:
             self._cleanup_mcp_config(mcp_config_path)
+            if generated_files:
+                try:
+                    HookSkillManager().cleanup(generated_files)
+                except Exception as e:
+                    logger.warning("Hook cleanup failed: %s", e)
 
     # ------------------------------------------------------------------
     # Streaming

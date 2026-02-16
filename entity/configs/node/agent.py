@@ -24,6 +24,7 @@ from entity.configs.base import (
     require_str,
     extend_path,
 )
+from .hooks import AgentHooksConfig
 from .memory import MemoryAttachmentConfig
 from .thinking import ThinkingConfig
 from entity.configs.node.tooling import ToolingConfig
@@ -336,6 +337,8 @@ class AgentConfig(BaseConfig):
     skip_memory: bool = False  # Skip ChatDev memory system (CLI providers manage their own)
     max_turns: int | None = None  # Max agentic turns for CLI providers (overrides provider default)
     idle_timeout: int | None = None  # Seconds of no output before stall detection (CLI providers, default 900s)
+    hooks: AgentHooksConfig | None = None  # Hook definitions for CLI providers
+    instructions_file: str | None = None  # Path to instruction MD file (.chatdev/workflows/...)
 
     # Runtime attributes (attached dynamically)
     token_tracker: Any | None = field(default=None, init=False, repr=False)
@@ -415,6 +418,14 @@ class AgentConfig(BaseConfig):
         if idle_timeout_raw is not None:
             idle_timeout = _coerce_positive_int(idle_timeout_raw, field_path=extend_path(path, "idle_timeout"), minimum=30)
 
+        # Hooks configuration (CLI providers)
+        hooks_cfg = None
+        if "hooks" in mapping and mapping["hooks"] is not None:
+            hooks_cfg = AgentHooksConfig.from_dict(mapping["hooks"], path=extend_path(path, "hooks"))
+
+        # Instructions file path
+        instructions_file = optional_str(mapping, "instructions_file", path)
+
         return cls(
             provider=provider,
             base_url=base_url,
@@ -431,6 +442,8 @@ class AgentConfig(BaseConfig):
             skip_memory=skip_memory,
             max_turns=max_turns,
             idle_timeout=idle_timeout,
+            hooks=hooks_cfg,
+            instructions_file=instructions_file,
             path=path,
         )
 
@@ -563,6 +576,23 @@ class AgentConfig(BaseConfig):
             type_hint="int",
             required=False,
             description="Seconds of no CLI output before stall detection triggers auto-recovery (CLI providers, default 900s, minimum 30s)",
+            advance=True,
+        ),
+        "hooks": ConfigFieldSpec(
+            name="hooks",
+            display_name="Agent Hooks",
+            type_hint="AgentHooksConfig",
+            required=False,
+            description="Hook definitions for CLI providers (PreToolUse, PostToolUse, Stop, etc.)",
+            child=AgentHooksConfig,
+            advance=True,
+        ),
+        "instructions_file": ConfigFieldSpec(
+            name="instructions_file",
+            display_name="Instructions File",
+            type_hint="str",
+            required=False,
+            description="Path to instruction MD file that gets loaded into the agent's context",
             advance=True,
         ),
     }

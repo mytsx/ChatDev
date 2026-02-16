@@ -15,6 +15,7 @@ from .node.memory import (
     SimpleMemoryConfig,
 )
 from .node.agent import AgentConfig, AgentRetryConfig
+from .node.hooks import AgentHooksConfig, HookHandler, HookMatcher
 from .node.human import HumanConfig
 from .node.subgraph import SubgraphConfig
 from .node.node import EdgeLink, Node
@@ -25,6 +26,7 @@ from .node.tooling import FunctionToolConfig, McpLocalConfig, McpRemoteConfig, T
 
 __all__ = [
     "AgentConfig",
+    "AgentHooksConfig",
     "AgentRetryConfig",
     "BaseConfig",
     "ConfigError",
