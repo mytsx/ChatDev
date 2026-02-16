@@ -161,6 +161,12 @@ graph:
           - name: tech-researcher
             description: Research and compare frameworks, libraries, and verify version compatibility
             source: .chatdev/workflows/agile_dev/agents/tech-researcher.md
+            model: haiku
+            max_turns: 12
+            mcp_servers:
+              context7:
+                command: npx
+                args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
         role: |
           ═══ SCOPE EVALUATION (do this FIRST) ═══
 
@@ -382,10 +388,25 @@ graph:
           - name: code-researcher
             description: Research API docs, framework documentation, and verify correct usage before coding
             source: .chatdev/workflows/agile_dev/agents/code-researcher.md
+            model: haiku
+            max_turns: 10
+            mcp_servers:
+              context7:
+                command: npx
+                args: ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"]
           - name: test-writer
             description: Generate unit tests for the code you have written
             source: .chatdev/workflows/agile_dev/agents/test-writer.md
+            model: sonnet
+            max_turns: 15
         hooks:
+          PostToolUse:
+            - matcher: "Write|Edit"
+              hooks:
+                - type: command
+                  command: "bash -c 'if command -v npx &>/dev/null && [ -f package.json ]; then npx --yes eslint --fix \"$TOOL_INPUT_path\" 2>/dev/null || true; elif command -v ruff &>/dev/null; then ruff check --fix \"$TOOL_INPUT_path\" 2>/dev/null || true; fi'"
+                  async_hook: true
+                  status_message: "Auto-formatting..."
           Stop:
             - hooks:
                 - type: prompt
@@ -555,9 +576,13 @@ graph:
           - name: security-scanner
             description: OWASP Top 10 focused security scanning of source code
             source: .chatdev/workflows/agile_dev/agents/security-scanner.md
+            model: haiku
+            max_turns: 12
           - name: complexity-analyzer
             description: Analyze code complexity including function length, nesting depth, and cyclomatic complexity
             source: .chatdev/workflows/agile_dev/agents/complexity-analyzer.md
+            model: haiku
+            max_turns: 10
         hooks:
           PreToolUse:
             - matcher: "Edit|Write|Bash"
@@ -729,10 +754,21 @@ graph:
           - name: test-generator
             description: Generate edge case test scenarios from requirements and write test files
             source: .chatdev/workflows/agile_dev/agents/test-generator.md
+            model: sonnet
+            max_turns: 15
           - name: bug-analyzer
             description: Analyze test failures to identify root causes and suggest minimal fixes
             source: .chatdev/workflows/agile_dev/agents/bug-analyzer.md
+            model: haiku
+            max_turns: 10
         hooks:
+          PostToolUse:
+            - matcher: "Write|Edit"
+              hooks:
+                - type: command
+                  command: "bash -c 'if command -v npx &>/dev/null && [ -f package.json ]; then npx --yes eslint --fix \"$TOOL_INPUT_path\" 2>/dev/null || true; elif command -v ruff &>/dev/null; then ruff check --fix \"$TOOL_INPUT_path\" 2>/dev/null || true; fi'"
+                  async_hook: true
+                  status_message: "Auto-linting test files..."
           Stop:
             - hooks:
                 - type: prompt
@@ -1048,6 +1084,8 @@ graph:
           - name: api-documenter
             description: Extract and document API endpoints from source code
             source: .chatdev/workflows/agile_dev/agents/api-documenter.md
+            model: haiku
+            max_turns: 10
         hooks:
           PreToolUse:
             - matcher: "Edit|Write"

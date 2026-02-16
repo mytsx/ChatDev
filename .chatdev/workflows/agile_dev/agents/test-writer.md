@@ -7,6 +7,8 @@ tools:
   - Glob
   - Write
   - Edit
+model: sonnet
+maxTurns: 15
 ---
 
 # Test Writer

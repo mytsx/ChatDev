@@ -11,6 +11,7 @@ from entity.configs.node.hooks import AgentHooksConfig, HookHandler, HookMatcher
 from runtime.node.agent.providers.hook_skill_manager import (
     GeneratedFiles,
     HookSkillManager,
+    _resolve_env_in_mcp_servers,
 )
 
 
@@ -136,6 +137,49 @@ class TestAgentHooksConfig:
         with pytest.raises(Exception):
             AgentHooksConfig.from_dict(data, path="test")
 
+    def test_handler_async_once_status_message(self):
+        data = {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "eslint --fix",
+                        "async_hook": True,
+                        "once": False,
+                        "status_message": "Auto-linting...",
+                    }],
+                }
+            ],
+        }
+        config = AgentHooksConfig.from_dict(data, path="test")
+        handler = config.PostToolUse[0].hooks[0]
+        assert handler.async_hook is True
+        assert handler.once is False
+        assert handler.status_message == "Auto-linting..."
+
+    def test_new_event_types(self):
+        data = {
+            "PostToolUseFailure": [
+                {"hooks": [{"type": "command", "command": "echo failed"}]},
+            ],
+            "SessionEnd": [
+                {"hooks": [{"type": "command", "command": "echo bye"}]},
+            ],
+            "UserPromptSubmit": [
+                {"hooks": [{"type": "command", "command": "echo prompt"}]},
+            ],
+            "SubagentStart": [
+                {"hooks": [{"type": "command", "command": "echo sub-start"}]},
+            ],
+        }
+        config = AgentHooksConfig.from_dict(data, path="test")
+        assert len(config.PostToolUseFailure) == 1
+        assert len(config.SessionEnd) == 1
+        assert len(config.UserPromptSubmit) == 1
+        assert len(config.SubagentStart) == 1
+        assert config.has_hooks() is True
+
 
 # ──────────────────────────────────────────────────────────────────
 # Claude Code Hook Generation
@@ -229,6 +273,71 @@ class TestClaudeCodeHooks:
         assert os.path.exists(result.hook_config_path)
         manager.cleanup(result)
         assert not os.path.exists(result.hook_config_path)
+
+    def test_async_once_status_in_generated_json(self, manager, workspace):
+        config = AgentHooksConfig(
+            PostToolUse=[
+                HookMatcher(
+                    matcher="Write|Edit",
+                    hooks=[
+                        HookHandler(
+                            type="command",
+                            command="eslint --fix",
+                            async_hook=True,
+                            once=False,
+                            status_message="Linting...",
+                            path="t",
+                        ),
+                    ],
+                    path="t",
+                )
+            ],
+            path="t",
+        )
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=config,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="test",
+        )
+        with open(result.hook_config_path) as f:
+            data = json.load(f)
+
+        hook = data["hooks"]["PostToolUse"][0]["hooks"][0]
+        assert hook["async"] is True
+        assert hook["statusMessage"] == "Linting..."
+        # once=False should NOT appear in output
+        assert "once" not in hook
+
+    def test_new_events_in_generated_json(self, manager, workspace):
+        config = AgentHooksConfig(
+            PostToolUseFailure=[
+                HookMatcher(
+                    hooks=[HookHandler(type="command", command="echo retry", path="t")],
+                    path="t",
+                )
+            ],
+            SessionEnd=[
+                HookMatcher(
+                    hooks=[HookHandler(type="command", command="echo cleanup", path="t")],
+                    path="t",
+                )
+            ],
+            path="t",
+        )
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=config,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="test",
+        )
+        with open(result.hook_config_path) as f:
+            data = json.load(f)
+
+        assert "PostToolUseFailure" in data["hooks"]
+        assert "SessionEnd" in data["hooks"]
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -581,6 +690,50 @@ class TestSubAgentConfig:
         with pytest.raises(Exception):
             SubAgentConfig.from_dict(data, path="test")
 
+    def test_from_dict_with_tools_and_model(self):
+        data = {
+            "name": "code-researcher",
+            "description": "Research API docs",
+            "source": "agents/code-researcher.md",
+            "tools": ["Read", "Grep", "Glob"],
+            "model": "haiku",
+            "max_turns": 10,
+        }
+        cfg = SubAgentConfig.from_dict(data, path="test")
+        assert cfg.tools == ["Read", "Grep", "Glob"]
+        assert cfg.model == "haiku"
+        assert cfg.max_turns == 10
+
+    def test_from_dict_with_disallowed_tools(self):
+        data = {
+            "name": "researcher",
+            "description": "Safe researcher",
+            "source": "agents/researcher.md",
+            "disallowed_tools": ["Write", "Edit", "Bash"],
+        }
+        cfg = SubAgentConfig.from_dict(data, path="test")
+        assert cfg.disallowed_tools == ["Write", "Edit", "Bash"]
+
+    def test_from_dict_invalid_max_turns(self):
+        data = {
+            "name": "test",
+            "description": "Test",
+            "source": "test.md",
+            "max_turns": 0,
+        }
+        with pytest.raises(Exception):
+            SubAgentConfig.from_dict(data, path="test")
+
+    def test_from_dict_invalid_tools_type(self):
+        data = {
+            "name": "test",
+            "description": "Test",
+            "source": "test.md",
+            "tools": "Read,Grep",  # Should be list
+        }
+        with pytest.raises(Exception):
+            SubAgentConfig.from_dict(data, path="test")
+
 
 # ──────────────────────────────────────────────────────────────────
 # Sub-Agent File Generation — Fixtures
@@ -601,6 +754,8 @@ def sub_agent_source(tmp_path):
         "  - Read\n"
         "  - Grep\n"
         "  - Glob\n"
+        "model: haiku\n"
+        "maxTurns: 10\n"
         "---\n\n"
         "# Code Researcher\n\n"
         "You are a research-only assistant.\n"
@@ -616,6 +771,23 @@ def sample_sub_agents(sub_agent_source):
             name="code-researcher",
             description="Research API docs",
             source=sub_agent_source,
+            path="test",
+        ),
+    ]
+
+
+@pytest.fixture
+def sub_agents_with_overrides(sub_agent_source):
+    """SubAgentConfig with model/tools/max_turns overrides."""
+    return [
+        SubAgentConfig(
+            name="code-researcher",
+            description="Research API docs",
+            source=sub_agent_source,
+            tools=["Read", "WebSearch"],
+            disallowed_tools=["Bash"],
+            model="sonnet",
+            max_turns=20,
             path="test",
         ),
     ]
@@ -682,6 +854,37 @@ class TestSubAgentClaude:
         manager.cleanup(result)
         assert not os.path.exists(result.sub_agent_files[0])
 
+    def test_model_and_max_turns_from_source(self, manager, workspace, sample_sub_agents):
+        """Source frontmatter model/maxTurns should appear in output when no override."""
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sample_sub_agents,
+        )
+        content = open(result.sub_agent_files[0]).read()
+        assert "model: haiku" in content
+        assert "maxTurns: 10" in content
+
+    def test_config_overrides_source_frontmatter(self, manager, workspace, sub_agents_with_overrides):
+        """SubAgentConfig fields should override source frontmatter values."""
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sub_agents_with_overrides,
+        )
+        content = open(result.sub_agent_files[0]).read()
+        # Config overrides source frontmatter
+        assert "tools: Read, WebSearch" in content
+        assert "disallowedTools: Bash" in content
+        assert "model: sonnet" in content
+        assert "maxTurns: 20" in content
+
 
 # ──────────────────────────────────────────────────────────────────
 # Sub-Agent File Generation — Gemini CLI
@@ -721,6 +924,23 @@ class TestSubAgentGemini:
         assert os.path.exists(result.sub_agent_files[0])
         manager.cleanup(result)
         assert not os.path.exists(result.sub_agent_files[0])
+
+    def test_gemini_model_mapping(self, manager, workspace, sub_agents_with_overrides):
+        """Gemini should map 'sonnet' → 'gemini-2.5-pro'."""
+        result = manager.generate(
+            provider_type="gemini-cli",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sub_agents_with_overrides,
+        )
+        content = open(result.sub_agent_files[0]).read()
+        assert "model: gemini-2.5-pro" in content
+        assert "max_turns: 20" in content
+        # Tools should be remapped
+        assert "read_file" in content
+        assert "web_search" in content
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -765,6 +985,19 @@ class TestSubAgentCopilot:
         assert len(result.sub_agent_files) == 0
         with open(target) as f:
             assert "Existing Copilot Agent" in f.read()
+
+    def test_copilot_model_mapping(self, manager, workspace, sub_agents_with_overrides):
+        """Copilot should map 'sonnet' → 'claude-sonnet-4-5'."""
+        result = manager.generate(
+            provider_type="copilot-cli",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=sub_agents_with_overrides,
+        )
+        content = open(result.sub_agent_files[0]).read()
+        assert "model: claude-sonnet-4-5" in content
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -813,3 +1046,154 @@ class TestSubAgentCombined:
             sub_agents=bad_agents,
         )
         assert len(result.sub_agent_files) == 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# MCP Server Resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestMcpServerResolution:
+    def test_resolve_env_placeholders(self, monkeypatch):
+        monkeypatch.setenv("MY_API_KEY", "secret-123")
+        servers = {
+            "context7": {
+                "command": "npx",
+                "args": ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{MY_API_KEY}"],
+            }
+        }
+        resolved = _resolve_env_in_mcp_servers(servers)
+        assert resolved["context7"]["args"][-1] == "secret-123"
+        # Original should not be mutated
+        assert servers["context7"]["args"][-1] == "$ENV{MY_API_KEY}"
+
+    def test_resolve_env_in_nested_dict(self, monkeypatch):
+        monkeypatch.setenv("DB_PASS", "hunter2")
+        servers = {
+            "oracle": {
+                "command": "python",
+                "args": ["server.py"],
+                "env": {"PASSWORD": "$ENV{DB_PASS}", "HOST": "localhost"},
+            }
+        }
+        resolved = _resolve_env_in_mcp_servers(servers)
+        assert resolved["oracle"]["env"]["PASSWORD"] == "hunter2"
+        assert resolved["oracle"]["env"]["HOST"] == "localhost"
+
+    def test_unresolved_placeholder_left_as_is(self):
+        servers = {
+            "test": {
+                "command": "npx",
+                "args": ["--key", "$ENV{NONEXISTENT_VAR}"],
+            }
+        }
+        resolved = _resolve_env_in_mcp_servers(servers)
+        assert resolved["test"]["args"][-1] == "$ENV{NONEXISTENT_VAR}"
+
+    def test_empty_servers_dict(self):
+        assert _resolve_env_in_mcp_servers({}) == {}
+
+    def test_non_dict_server_value_skipped(self):
+        servers = {"bad": "not_a_dict", "good": {"command": "echo"}}
+        resolved = _resolve_env_in_mcp_servers(servers)
+        assert resolved["bad"] == "not_a_dict"
+        assert resolved["good"]["command"] == "echo"
+
+
+class TestSubAgentMcpInClaude:
+    @pytest.fixture
+    def sub_agent_source_with_mcp(self, tmp_path):
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        md_file = agents_dir / "researcher.md"
+        md_file.write_text(
+            "---\n"
+            "name: researcher\n"
+            "description: Research with MCP\n"
+            "tools:\n"
+            "  - Read\n"
+            "  - Grep\n"
+            "model: haiku\n"
+            "maxTurns: 10\n"
+            "---\n\n"
+            "# Researcher\n\nUse Context7 for research.\n"
+        )
+        return str(md_file)
+
+    def test_mcp_servers_in_claude_frontmatter(self, manager, workspace, sub_agent_source_with_mcp, monkeypatch):
+        monkeypatch.setenv("CONTEXT7_API_KEY", "test-key-abc")
+        agents = [
+            SubAgentConfig(
+                name="researcher",
+                description="Research with MCP",
+                source=sub_agent_source_with_mcp,
+                mcp_servers={
+                    "context7": {
+                        "command": "npx",
+                        "args": ["-y", "@upstash/context7-mcp", "--api-key", "$ENV{CONTEXT7_API_KEY}"],
+                    }
+                },
+                path="test",
+            ),
+        ]
+        result = manager.generate(
+            provider_type="claude-code",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=agents,
+        )
+        assert len(result.sub_agent_files) == 1
+        content = open(result.sub_agent_files[0]).read()
+        assert "mcpServers:" in content
+        assert "context7:" in content
+        assert "test-key-abc" in content
+        # $ENV{} should be resolved
+        assert "$ENV{CONTEXT7_API_KEY}" not in content
+
+    def test_mcp_servers_not_in_gemini(self, manager, workspace, sub_agent_source_with_mcp):
+        """Gemini sub-agents should NOT include mcpServers (they inherit from workspace)."""
+        agents = [
+            SubAgentConfig(
+                name="researcher",
+                description="Research with MCP",
+                source=sub_agent_source_with_mcp,
+                mcp_servers={
+                    "context7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp"]},
+                },
+                path="test",
+            ),
+        ]
+        result = manager.generate(
+            provider_type="gemini-cli",
+            hooks_config=None,
+            instructions_file=None,
+            workspace_dir=workspace,
+            node_id="dev",
+            sub_agents=agents,
+        )
+        content = open(result.sub_agent_files[0]).read()
+        assert "mcpServers" not in content
+
+    def test_mcp_servers_from_dict_parsing(self):
+        data = {
+            "name": "test-agent",
+            "description": "Test MCP",
+            "source": "test.md",
+            "mcp_servers": {
+                "myserver": {"command": "npx", "args": ["-y", "my-mcp"]},
+            },
+        }
+        cfg = SubAgentConfig.from_dict(data, path="test")
+        assert cfg.mcp_servers == {"myserver": {"command": "npx", "args": ["-y", "my-mcp"]}}
+
+    def test_mcp_servers_invalid_type_raises(self):
+        data = {
+            "name": "test",
+            "description": "Test",
+            "source": "test.md",
+            "mcp_servers": "not-a-dict",
+        }
+        with pytest.raises(Exception):
+            SubAgentConfig.from_dict(data, path="test")

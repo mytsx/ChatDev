@@ -7,6 +7,8 @@ tools:
   - Glob
   - WebFetch
   - WebSearch
+model: haiku
+maxTurns: 10
 ---
 
 # Code Researcher

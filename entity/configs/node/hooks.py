@@ -28,6 +28,9 @@ class HookHandler(BaseConfig):
     prompt: Optional[str] = None  # LLM prompt (type=prompt|agent, Claude Code only)
     timeout: Optional[int] = None  # seconds
     model: Optional[str] = None  # model override (type=prompt|agent)
+    async_hook: bool = False  # Run hook in background (non-blocking, Claude Code)
+    once: bool = False  # Run hook only once per session (Claude Code)
+    status_message: Optional[str] = None  # Custom spinner message while hook runs (Claude Code)
 
     FIELD_SPECS = {
         "type": ConfigFieldSpec(
@@ -67,6 +70,32 @@ class HookHandler(BaseConfig):
             description="Model override for prompt/agent hooks",
             advance=True,
         ),
+        "async_hook": ConfigFieldSpec(
+            name="async_hook",
+            display_name="Async",
+            type_hint="bool",
+            required=False,
+            default=False,
+            description="Run hook in background (non-blocking). Useful for auto-lint/test after edits (Claude Code)",
+            advance=True,
+        ),
+        "once": ConfigFieldSpec(
+            name="once",
+            display_name="Run Once",
+            type_hint="bool",
+            required=False,
+            default=False,
+            description="Run hook only once per session, not on every event (Claude Code)",
+            advance=True,
+        ),
+        "status_message": ConfigFieldSpec(
+            name="status_message",
+            display_name="Status Message",
+            type_hint="str",
+            required=False,
+            description="Custom spinner message displayed while hook runs (Claude Code)",
+            advance=True,
+        ),
     }
 
     @classmethod
@@ -89,6 +118,14 @@ class HookHandler(BaseConfig):
                 raise ConfigError("timeout must be an integer", extend_path(path, "timeout"))
             timeout = timeout_raw
 
+        async_hook = optional_bool(mapping, "async_hook", path, default=False)
+        if async_hook is None:
+            async_hook = False
+        once = optional_bool(mapping, "once", path, default=False)
+        if once is None:
+            once = False
+        status_message = optional_str(mapping, "status_message", path)
+
         if handler_type == "command" and not command:
             raise ConfigError("command is required for type=command hooks", path)
         if handler_type in ("prompt", "agent") and not prompt:
@@ -100,6 +137,9 @@ class HookHandler(BaseConfig):
             prompt=prompt,
             timeout=timeout,
             model=model,
+            async_hook=async_hook,
+            once=once,
+            status_message=status_message,
             path=path,
         )
 
@@ -147,7 +187,19 @@ class HookMatcher(BaseConfig):
 
 
 # Valid event names for hooks (provider-agnostic)
-HOOK_EVENTS = ("PreToolUse", "PostToolUse", "Stop", "SessionStart", "PreCompact")
+HOOK_EVENTS = (
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "Stop",
+    "SessionStart",
+    "SessionEnd",
+    "PreCompact",
+    "UserPromptSubmit",
+    "Notification",
+    "SubagentStart",
+    "SubagentStop",
+)
 
 
 @dataclass
@@ -160,9 +212,15 @@ class AgentHooksConfig(BaseConfig):
 
     PreToolUse: List[HookMatcher] = field(default_factory=list)
     PostToolUse: List[HookMatcher] = field(default_factory=list)
+    PostToolUseFailure: List[HookMatcher] = field(default_factory=list)
     Stop: List[HookMatcher] = field(default_factory=list)
     SessionStart: List[HookMatcher] = field(default_factory=list)
+    SessionEnd: List[HookMatcher] = field(default_factory=list)
     PreCompact: List[HookMatcher] = field(default_factory=list)
+    UserPromptSubmit: List[HookMatcher] = field(default_factory=list)
+    Notification: List[HookMatcher] = field(default_factory=list)
+    SubagentStart: List[HookMatcher] = field(default_factory=list)
+    SubagentStop: List[HookMatcher] = field(default_factory=list)
 
     FIELD_SPECS = {
         "PreToolUse": ConfigFieldSpec(
@@ -181,6 +239,15 @@ class AgentHooksConfig(BaseConfig):
             description="Hooks that run after a tool is used (e.g., lint checks)",
             child=HookMatcher,
         ),
+        "PostToolUseFailure": ConfigFieldSpec(
+            name="PostToolUseFailure",
+            display_name="Post Tool Use Failure Hooks",
+            type_hint="list[HookMatcher]",
+            required=False,
+            description="Hooks that run after a tool fails (e.g., auto-recovery)",
+            child=HookMatcher,
+            advance=True,
+        ),
         "Stop": ConfigFieldSpec(
             name="Stop",
             display_name="Stop Hooks",
@@ -198,12 +265,57 @@ class AgentHooksConfig(BaseConfig):
             child=HookMatcher,
             advance=True,
         ),
+        "SessionEnd": ConfigFieldSpec(
+            name="SessionEnd",
+            display_name="Session End Hooks",
+            type_hint="list[HookMatcher]",
+            required=False,
+            description="Hooks that run when session ends (e.g., cleanup, cost logging)",
+            child=HookMatcher,
+            advance=True,
+        ),
         "PreCompact": ConfigFieldSpec(
             name="PreCompact",
             display_name="Pre Compact Hooks",
             type_hint="list[HookMatcher]",
             required=False,
             description="Hooks that run before context compaction",
+            child=HookMatcher,
+            advance=True,
+        ),
+        "UserPromptSubmit": ConfigFieldSpec(
+            name="UserPromptSubmit",
+            display_name="User Prompt Submit Hooks",
+            type_hint="list[HookMatcher]",
+            required=False,
+            description="Hooks that run when user submits a prompt (e.g., input validation)",
+            child=HookMatcher,
+            advance=True,
+        ),
+        "Notification": ConfigFieldSpec(
+            name="Notification",
+            display_name="Notification Hooks",
+            type_hint="list[HookMatcher]",
+            required=False,
+            description="Hooks that run on agent notifications",
+            child=HookMatcher,
+            advance=True,
+        ),
+        "SubagentStart": ConfigFieldSpec(
+            name="SubagentStart",
+            display_name="Sub-Agent Start Hooks",
+            type_hint="list[HookMatcher]",
+            required=False,
+            description="Hooks that run when a sub-agent starts",
+            child=HookMatcher,
+            advance=True,
+        ),
+        "SubagentStop": ConfigFieldSpec(
+            name="SubagentStop",
+            display_name="Sub-Agent Stop Hooks",
+            type_hint="list[HookMatcher]",
+            required=False,
+            description="Hooks that run when a sub-agent stops",
             child=HookMatcher,
             advance=True,
         ),
@@ -261,6 +373,11 @@ class SubAgentConfig(BaseConfig):
     name: str = ""  # "code-researcher" (lowercase, hyphens)
     description: str = ""  # Short description for the agent
     source: str = ""  # Path to template MD file (.chatdev/workflows/agile_dev/agents/code-researcher.md)
+    tools: List[str] = field(default_factory=list)  # Tool whitelist (overrides source frontmatter)
+    disallowed_tools: List[str] = field(default_factory=list)  # Tool blacklist
+    model: Optional[str] = None  # Model override: haiku, sonnet, opus (None = inherit from source)
+    max_turns: Optional[int] = None  # Max agentic turns (None = inherit from source)
+    mcp_servers: Dict[str, Any] = field(default_factory=dict)  # MCP servers for the sub-agent (Claude Code only)
 
     FIELD_SPECS = {
         "name": ConfigFieldSpec(
@@ -284,6 +401,46 @@ class SubAgentConfig(BaseConfig):
             required=True,
             description="Path to the template MD file (relative to project root)",
         ),
+        "tools": ConfigFieldSpec(
+            name="tools",
+            display_name="Allowed Tools",
+            type_hint="list[str]",
+            required=False,
+            description="Tool whitelist for the sub-agent (overrides source frontmatter if set)",
+            advance=True,
+        ),
+        "disallowed_tools": ConfigFieldSpec(
+            name="disallowed_tools",
+            display_name="Disallowed Tools",
+            type_hint="list[str]",
+            required=False,
+            description="Tool blacklist — these tools will be blocked for the sub-agent",
+            advance=True,
+        ),
+        "model": ConfigFieldSpec(
+            name="model",
+            display_name="Model",
+            type_hint="str",
+            required=False,
+            description="Model for the sub-agent: haiku, sonnet, opus, or inherit from source",
+            advance=True,
+        ),
+        "max_turns": ConfigFieldSpec(
+            name="max_turns",
+            display_name="Max Turns",
+            type_hint="int",
+            required=False,
+            description="Maximum agentic turns for the sub-agent",
+            advance=True,
+        ),
+        "mcp_servers": ConfigFieldSpec(
+            name="mcp_servers",
+            display_name="MCP Servers",
+            type_hint="dict[str, Any]",
+            required=False,
+            description="MCP server definitions for the sub-agent (Claude Code frontmatter format). Keys are server names, values are {command, args, env} dicts.",
+            advance=True,
+        ),
     }
 
     @classmethod
@@ -302,9 +459,52 @@ class SubAgentConfig(BaseConfig):
         if not source:
             raise ConfigError("sub-agent source file is required", extend_path(path, "source"))
 
+        # Optional tool lists
+        tools: List[str] = []
+        raw_tools = mapping.get("tools")
+        if raw_tools is not None:
+            if not isinstance(raw_tools, list):
+                raise ConfigError("tools must be a list of strings", extend_path(path, "tools"))
+            for idx, t in enumerate(raw_tools):
+                if not isinstance(t, str):
+                    raise ConfigError("each tool must be a string", extend_path(path, f"tools[{idx}]"))
+                tools.append(t.strip())
+
+        disallowed_tools: List[str] = []
+        raw_disallowed = mapping.get("disallowed_tools")
+        if raw_disallowed is not None:
+            if not isinstance(raw_disallowed, list):
+                raise ConfigError("disallowed_tools must be a list of strings", extend_path(path, "disallowed_tools"))
+            for idx, t in enumerate(raw_disallowed):
+                if not isinstance(t, str):
+                    raise ConfigError("each tool must be a string", extend_path(path, f"disallowed_tools[{idx}]"))
+                disallowed_tools.append(t.strip())
+
+        model = optional_str(mapping, "model", path)
+        max_turns: Optional[int] = None
+        raw_mt = mapping.get("max_turns")
+        if raw_mt is not None:
+            if not isinstance(raw_mt, int) or isinstance(raw_mt, bool):
+                raise ConfigError("max_turns must be an integer", extend_path(path, "max_turns"))
+            if raw_mt < 1:
+                raise ConfigError("max_turns must be >= 1", extend_path(path, "max_turns"))
+            max_turns = raw_mt
+
+        mcp_servers: Dict[str, Any] = {}
+        raw_mcp = mapping.get("mcp_servers")
+        if raw_mcp is not None:
+            if not isinstance(raw_mcp, Mapping):
+                raise ConfigError("mcp_servers must be a mapping", extend_path(path, "mcp_servers"))
+            mcp_servers = dict(raw_mcp)
+
         return cls(
             name=name,
             description=description,
             source=source,
+            tools=tools,
+            disallowed_tools=disallowed_tools,
+            model=model,
+            max_turns=max_turns,
+            mcp_servers=mcp_servers,
             path=path,
         )

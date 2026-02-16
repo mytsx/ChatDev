@@ -7,6 +7,8 @@ tools:
   - Glob
   - WebFetch
   - WebSearch
+model: haiku
+maxTurns: 12
 ---
 
 # Tech Researcher

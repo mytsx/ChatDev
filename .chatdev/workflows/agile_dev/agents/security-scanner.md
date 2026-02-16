@@ -5,6 +5,8 @@ tools:
   - Read
   - Grep
   - Glob
+model: haiku
+maxTurns: 12
 ---
 
 # Security Scanner

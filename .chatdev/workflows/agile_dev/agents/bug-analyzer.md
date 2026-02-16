@@ -5,6 +5,8 @@ tools:
   - Read
   - Grep
   - Glob
+model: haiku
+maxTurns: 10
 ---
 
 # Bug Analyzer

@@ -12,6 +12,7 @@ Lifecycle:
 import json
 import logging
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,20 +22,76 @@ from entity.configs.node.hooks import AgentHooksConfig, HookHandler, HookMatcher
 
 logger = logging.getLogger(__name__)
 
+# Regex for $ENV{VAR_NAME} placeholders (same pattern as cli_provider_base.py)
+_ENV_PLACEHOLDER = re.compile(r"\$ENV\{([A-Za-z0-9_]+)\}")
+
+
+def _resolve_env_in_mcp_servers(servers: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve $ENV{VAR_NAME} placeholders in MCP server config using os.environ.
+
+    Recursively walks the dict, replacing $ENV{X} with os.environ["X"].
+    Unresolved placeholders are left as-is (the CLI will resolve them at runtime).
+    """
+    import copy
+    result = copy.deepcopy(servers)
+    for server_name, server_cfg in result.items():
+        if not isinstance(server_cfg, dict):
+            continue
+        _resolve_env_recursive(server_cfg)
+    return result
+
+
+def _resolve_env_recursive(obj: Any) -> None:
+    """In-place resolve $ENV{} placeholders in a nested dict/list structure."""
+    if isinstance(obj, dict):
+        for key in list(obj.keys()):
+            val = obj[key]
+            if isinstance(val, str):
+                obj[key] = _resolve_env_str(val)
+            elif isinstance(val, (dict, list)):
+                _resolve_env_recursive(val)
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            if isinstance(item, str):
+                obj[i] = _resolve_env_str(item)
+            elif isinstance(item, (dict, list)):
+                _resolve_env_recursive(item)
+
+
+def _resolve_env_str(value: str) -> str:
+    """Replace $ENV{VAR} with os.environ value. Leave as-is if not found."""
+    def replacer(m: re.Match) -> str:
+        var_name = m.group(1)
+        return os.environ.get(var_name, m.group(0))
+    return _ENV_PLACEHOLDER.sub(replacer, value)
+
+
 # Event name mapping: ChatDev (provider-agnostic) → Provider-specific
 EVENT_MAP_GEMINI = {
     "PreToolUse": "BeforeTool",
     "PostToolUse": "AfterTool",
+    "PostToolUseFailure": "AfterToolFailure",
     "Stop": "AfterAgent",
     "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
     "PreCompact": "PreCompress",
+    "UserPromptSubmit": "BeforePrompt",
+    "Notification": "Notification",
+    "SubagentStart": "SubagentStart",
+    "SubagentStop": "SubagentStop",
 }
 
 EVENT_MAP_COPILOT = {
     "PreToolUse": "preToolUse",
     "PostToolUse": "postToolUse",
+    "PostToolUseFailure": "postToolUseFailure",
     "Stop": "sessionEnd",
     "SessionStart": "sessionStart",
+    "SessionEnd": "sessionEnd",
+    "UserPromptSubmit": "userPromptSubmit",
+    "Notification": "notification",
+    "SubagentStart": "subagentStart",
+    "SubagentStop": "subagentStop",
 }
 
 
@@ -265,6 +322,13 @@ class HookSkillManager:
             result["timeout"] = handler.timeout
         if handler.model:
             result["model"] = handler.model
+        # Claude Code extended hook features
+        if handler.async_hook:
+            result["async"] = True
+        if handler.once:
+            result["once"] = True
+        if handler.status_message:
+            result["statusMessage"] = handler.status_message
         return result
 
     # ------------------------------------------------------------------
@@ -499,52 +563,103 @@ class HookSkillManager:
     @staticmethod
     def _format_claude_sub_agent(fm: dict, body: str, cfg: SubAgentConfig) -> str:
         """Format for Claude Code: .claude/agents/{name}.md"""
+        import yaml
+
         lines = ["---"]
         lines.append(f"name: {fm.get('name', cfg.name)}")
         lines.append(f"description: {fm.get('description', cfg.description)}")
-        # Claude uses comma-separated tool names
-        tools = fm.get("tools", [])
-        if isinstance(tools, list):
+        # Tools: YAML config overrides source frontmatter
+        tools = cfg.tools if cfg.tools else fm.get("tools", [])
+        if isinstance(tools, list) and tools:
             lines.append(f"tools: {', '.join(tools)}")
+        # Disallowed tools (Claude Code specific)
+        disallowed = cfg.disallowed_tools
+        if disallowed:
+            lines.append(f"disallowedTools: {', '.join(disallowed)}")
+        # Model: YAML config overrides source frontmatter
+        model = cfg.model or fm.get("model")
+        if model:
+            lines.append(f"model: {model}")
+        # Max turns: YAML config overrides source frontmatter
+        max_turns = cfg.max_turns or fm.get("maxTurns") or fm.get("max_turns")
+        if max_turns:
+            lines.append(f"maxTurns: {max_turns}")
+        # MCP servers: YAML config overrides source frontmatter
+        mcp_servers = cfg.mcp_servers if cfg.mcp_servers else fm.get("mcpServers", {})
+        if mcp_servers:
+            # Resolve $ENV{} placeholders from os.environ
+            resolved = _resolve_env_in_mcp_servers(mcp_servers)
+            mcp_yaml = yaml.dump({"mcpServers": resolved}, default_flow_style=False).rstrip()
+            lines.append(mcp_yaml)
         lines.append("---")
         lines.append("")
         lines.append(body)
         return "\n".join(lines)
 
-    @staticmethod
-    def _format_gemini_sub_agent(fm: dict, body: str, cfg: SubAgentConfig) -> str:
+    # Gemini tool name mapping (ChatDev/Claude names → Gemini equivalents)
+    GEMINI_TOOL_MAP = {
+        "Read": "read_file",
+        "Grep": "grep_search",
+        "Glob": "list_directory",
+        "Write": "write_file",
+        "Edit": "edit_file",
+        "WebFetch": "web_fetch",
+        "WebSearch": "web_search",
+        "Bash": "shell",
+    }
+
+    # Gemini model name mapping
+    GEMINI_MODEL_MAP = {
+        "haiku": "gemini-2.5-flash",
+        "sonnet": "gemini-2.5-pro",
+        "opus": "gemini-2.5-pro",
+    }
+
+    @classmethod
+    def _format_gemini_sub_agent(cls, fm: dict, body: str, cfg: SubAgentConfig) -> str:
         """Format for Gemini CLI: .gemini/agents/{name}.md"""
-        # Gemini tool name mapping
-        tool_map = {
-            "Read": "read_file",
-            "Grep": "grep_search",
-            "Glob": "list_directory",
-            "Write": "write_file",
-            "Edit": "edit_file",
-            "WebFetch": "web_fetch",
-            "WebSearch": "web_search",
-        }
         lines = ["---"]
         lines.append(f"name: {fm.get('name', cfg.name)}")
         lines.append(f"description: {fm.get('description', cfg.description)}")
-        tools = fm.get("tools", [])
-        if isinstance(tools, list):
-            gemini_tools = [tool_map.get(t, t) for t in tools]
+        tools = cfg.tools if cfg.tools else fm.get("tools", [])
+        if isinstance(tools, list) and tools:
+            gemini_tools = [cls.GEMINI_TOOL_MAP.get(t, t) for t in tools]
             lines.append(f"tools: [{', '.join(gemini_tools)}]")
+        # Model mapping for Gemini
+        model = cfg.model or fm.get("model")
+        if model:
+            gemini_model = cls.GEMINI_MODEL_MAP.get(model, model)
+            lines.append(f"model: {gemini_model}")
+        # Max turns
+        max_turns = cfg.max_turns or fm.get("maxTurns") or fm.get("max_turns")
+        if max_turns:
+            lines.append(f"max_turns: {max_turns}")
         lines.append("---")
         lines.append("")
         lines.append(body)
         return "\n".join(lines)
 
-    @staticmethod
-    def _format_copilot_sub_agent(fm: dict, body: str, cfg: SubAgentConfig) -> str:
+    # Copilot model name mapping
+    COPILOT_MODEL_MAP = {
+        "haiku": "claude-haiku-4-5",
+        "sonnet": "claude-sonnet-4-5",
+        "opus": "claude-opus-4",
+    }
+
+    @classmethod
+    def _format_copilot_sub_agent(cls, fm: dict, body: str, cfg: SubAgentConfig) -> str:
         """Format for Copilot CLI: .github/agents/{name}.md"""
         lines = ["---"]
         lines.append(f"name: {fm.get('name', cfg.name)}")
         lines.append(f"description: {fm.get('description', cfg.description)}")
-        tools = fm.get("tools", [])
-        if isinstance(tools, list):
+        tools = cfg.tools if cfg.tools else fm.get("tools", [])
+        if isinstance(tools, list) and tools:
             lines.append(f"tools: {', '.join(tools)}")
+        # Model mapping for Copilot
+        model = cfg.model or fm.get("model")
+        if model:
+            copilot_model = cls.COPILOT_MODEL_MAP.get(model, model)
+            lines.append(f"model: {copilot_model}")
         lines.append("---")
         lines.append("")
         lines.append(body)
